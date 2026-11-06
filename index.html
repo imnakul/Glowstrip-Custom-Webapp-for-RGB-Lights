@@ -377,6 +377,8 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
       <select id="offTimer" class="search" style="width:auto;margin:0">
         <option value="0">Never</option><option value="900">15 min</option><option value="1800">30 min</option><option value="3600">1 hour</option><option value="7200">2 hours</option>
       </select></div>
+    <h2>Connection</h2>
+    <div class="field"><span>Connect to the last strip automatically<br><span class="hint" id="autoHint">When the app opens or comes back from the background</span></span><button class="switch" id="autoConn" role="switch" aria-label="Auto-connect"></button></div>
     <h2>Running in the background</h2>
     <div class="field"><span>Keep effects and music running when the app is in the background<br><span class="hint" style="margin:0">Shows a Glowstrip media notification you can stop from</span></span><button class="switch" id="bgRun" role="switch" aria-label="Run in background"></button></div>
     <div class="field"><span>Keep the screen on while effects run<br><span class="hint" style="margin:0">Most reliable; uses more battery</span></span><button class="switch" id="keepAwake" role="switch" aria-label="Keep screen on"></button></div>
@@ -424,9 +426,10 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 (() => {
 "use strict";
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.7.1";
+const VERSION = "1.8.0";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Auto-connects to your last strip when the app opens or comes back from the background (can be turned off in Settings)",
   "Background fix: the keep-alive track is now longer than 5 s, which Chrome needs before it shows the media notification",
   "Music starts the keep-alive during your tap, before the mic prompt",
   "Settings shows a background check: how long the app kept running and why it stopped",
@@ -606,6 +609,50 @@ async function reconnect(){         // reconnect to the last strip without the p
   catch(e){ setConn("off","Reconnect"); toast("Couldn't reach " + (dev.name||"the strip") + ". Is it switched on and the Lotus app closed?"); }
 }
 
+/* ---- auto-connect ----
+   Within a session the strip object is kept, so coming back from the background
+   reconnects without any tap. After a full restart, Chrome only hands back the
+   strip if it supports getDevices(); otherwise one tap on the pill reconnects. */
+let autoBusy = false;
+async function autoConnect(reason){
+  if(autoBusy || link.ok || !navigator.bluetooth || !store.get("autoConn", true)) return;
+  const saved = store.get(DEV_KEY, null);
+  if(!saved && !link.dev) return;
+  let dev = link.dev;
+  if(!dev && navigator.bluetooth.getDevices){
+    try{ dev = (await navigator.bluetooth.getDevices()).find(d => d.id === saved.id); }catch{}
+  }
+  const hint = document.getElementById("autoHint");
+  if(!dev){
+    setConn("off", "Reconnect");
+    if(hint) hint.textContent = navigator.bluetooth.getDevices
+      ? "Chrome hasn't kept permission for the strip. Tap the pill once to reconnect."
+      : "This version of Chrome can't reconnect by itself after the app restarts. Tap the pill once; coming back from the background still reconnects automatically.";
+    return;
+  }
+  autoBusy = true; clearTimeout(retryTimer);
+  try{
+    // Android often needs to hear the strip advertise before it will connect
+    if(dev.watchAdvertisements && !dev.gatt.connected){
+      const ac = new AbortController();
+      await Promise.race([
+        new Promise(res => { dev.addEventListener("advertisementreceived", res, {once:true}); dev.watchAdvertisements({signal: ac.signal}).catch(res); }),
+        new Promise(res => setTimeout(res, 4000))
+      ]);
+      ac.abort();
+    }
+    await attach(dev, true);
+    toast("Reconnected to " + (dev.name || "strip"));
+    if(hint) hint.textContent = "When the app opens or comes back from the background";
+  }catch(e){
+    setConn("off", "Reconnect");
+    if(reason !== "visible") toast("Couldn't reach " + (dev.name||"the strip") + ". Tap the pill to try again.");
+  }finally{ autoBusy = false; }
+}
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "visible") setTimeout(() => autoConnect("visible"), 300);
+});
+
 /* ---- connection sheet ---- */
 function renderSheet(){
   const sh = $("#connSheet"); if(!sh) return;
@@ -746,7 +793,8 @@ function pendingSelect(gridSel, match, sendPromise, onDone){
 function setConn(state, txt){ $("#connBtn").dataset.state=state; $("#connTxt").textContent=txt; }
 $("#connBtn").onclick = () => {
   if(!navigator.bluetooth){ toast("This browser can't use Bluetooth. Open the page in Chrome on Android."); return; }
-  if(!link.ok && !link.dev && !store.get(DEV_KEY,null)) return connect();   // first time: straight to the picker
+  // no strip object to reuse and no way to get it back without the picker: open the picker directly
+  if(!link.ok && !link.dev && (!store.get(DEV_KEY,null) || !navigator.bluetooth.getDevices)) return connect();
   openSheet();
 };
 $("#disc").onclick = disconnect;
@@ -1348,6 +1396,9 @@ $("#devSens").oninput=e=>{ $("#devSensOut").textContent=e.target.value+"%"; link
 /* ---------- settings ---------- */
 $("#pixN").value=S.pix;
 $("#pixN").onchange=e=>{ S.pix=clamp(+e.target.value||60,10,1000); e.target.value=S.pix; store.set("pix",S.pix); buildPath(); renderSegs(); };
+{ const el=$("#autoConn"); el.setAttribute("aria-checked", store.get("autoConn", true));
+  el.onclick=()=>{ const on=el.getAttribute("aria-checked")!=="true"; el.setAttribute("aria-checked",on); store.set("autoConn",on);
+    toast(on?"Auto-connect on":"Auto-connect off"); if(on) autoConnect("setting"); }; }
 [["bgRun",true],["keepAwake",false]].forEach(([k,d])=>{
   const el=$("#"+k); el.setAttribute("aria-checked", store.get(k,d));
   el.onclick=()=>{ const on=el.getAttribute("aria-checked")!=="true"; el.setAttribute("aria-checked",on); store.set(k,on);
@@ -1439,6 +1490,7 @@ requestAnimationFrame(frame);
 moveInd(true);
 document.getElementById("splashVer").textContent = "v" + VERSION;
 (function(){
+  setTimeout(() => autoConnect("launch"), 900);
   const sp = document.getElementById("splash");
   const wait = reduced ? 250 : Math.max(0, 1300 - performance.now());
   setTimeout(() => { sp.classList.add("out"); setTimeout(() => sp.remove(), 600); }, wait);
