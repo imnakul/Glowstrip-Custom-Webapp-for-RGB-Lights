@@ -22,3 +22,8 @@ A phone web app for controlling MELK-OA10 (Lotus Lamp X family) Bluetooth RGB st
 ## Protocol
 Service `FFF0`, write `FFF3`, notify `FFF4`, 9-byte frames `7E len cmd … EF`.
 Command IDs from the community reverse engineering at https://github.com/l0lsec/LotusLampX.
+
+## Versions
+The current version shows under the app name and in Settings → About. Bump `VERSION`, `RELEASED` and `NOTES` at the top of the script in `index.html` with every change.
+
+- **1.2.0** (6 Nov 2026): version display; 42 studio effects, colour combo builder, shuffle; Segments marked preview-only

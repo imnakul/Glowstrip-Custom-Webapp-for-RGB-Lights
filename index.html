@@ -33,8 +33,9 @@ button{cursor:pointer}
 
 /* top bar */
 .top{display:flex;align-items:center;gap:8px;padding:14px 16px 4px;padding-top:calc(14px + env(safe-area-inset-top))}
-.brand{font-family:var(--display);font-weight:800;font-size:1.45rem;letter-spacing:-.02em;margin:0;flex:1}
-.conn{display:flex;align-items:center;gap:8px;border:1px solid var(--seam);background:var(--wall);border-radius:999px;padding:8px 12px 8px 10px;font-size:.88rem;white-space:nowrap;min-width:0;max-width:46vw}
+.brand{font-family:var(--display);font-weight:800;font-size:1.45rem;letter-spacing:-.02em;margin:0;flex:none;white-space:nowrap;line-height:1.05}
+.ver{display:block;font-family:var(--body);font-weight:400;font-size:.72rem;letter-spacing:0;color:var(--ink-3)}
+.conn{display:flex;align-items:center;gap:8px;border:1px solid var(--seam);background:var(--wall);border-radius:999px;padding:8px 12px 8px 10px;font-size:.88rem;white-space:nowrap;min-width:0;max-width:46vw;margin-left:auto}
 .conn #connTxt{overflow:hidden;text-overflow:ellipsis}
 .conn .dot{width:10px;height:10px;border-radius:50%;background:var(--ink-3)}
 .conn[data-state="on"] .dot{background:var(--ok);box-shadow:0 0 10px var(--ok)}
@@ -150,7 +151,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 <body>
 
 <header class="top">
-  <h1 class="brand">Glowstrip</h1>
+  <h1 class="brand">Glowstrip <span class="ver" id="verBadge"></span></h1>
   <button class="conn" id="connBtn" data-state="off" aria-live="polite"><span class="dot"></span><span id="connTxt">Connect strip</span></button>
   <button class="power" id="setBtn" aria-label="Strip settings and Lab" style="background:transparent">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
@@ -300,6 +301,9 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
     <div class="row"><input class="hexin" id="rawHex" placeholder="7e 07 05 03 ff 00 00 10 ef" aria-label="Raw hex"><button class="btn" id="rawSend">Send</button></div>
     <div class="log" id="log" style="margin-top:10px" aria-live="polite"></div>
     <div class="btns"><button class="btn" id="disc">Disconnect</button></div>
+    <h2>About</h2>
+    <p class="hint" style="margin-bottom:4px">Glowstrip <b id="verTxt" style="color:var(--ink)"></b>, released <span id="verDate"></span></p>
+    <ul class="hint" id="verNotes" style="margin:0;padding-left:18px"></ul>
   </section>
 </main>
 
@@ -316,6 +320,14 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 <script>
 (() => {
 "use strict";
+/* ---------- version: bump on every change ---------- */
+const VERSION = "1.2.0";
+const RELEASED = "6 Nov 2026";
+const NOTES = [
+  "Version number shown in the header and here",
+  "42 studio effects in 5 groups, colour combo builder, shuffle",
+  "Segments tab marked as preview only (controller has no per-pixel command)",
+];
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
@@ -962,6 +974,11 @@ function openTab(p){
 $("#setBtn").onclick=()=>{ $$(".panel").forEach(x=>x.classList.toggle("on", x.id==="p-settings")); $$("nav.tabs button").forEach(x=>x.setAttribute("aria-selected",false)); window.scrollTo({top:0,behavior:"smooth"}); };
 
 /* ---------- boot ---------- */
+document.getElementById("verBadge").textContent = "v" + VERSION;
+document.getElementById("verTxt").textContent = "v" + VERSION;
+document.getElementById("verDate").textContent = RELEASED;
+document.getElementById("verNotes").innerHTML = NOTES.map(n=>"<li>"+n+"</li>").join("");
+document.title = "Glowstrip v" + VERSION;
 layout();
 renderCats(); renderFx(); renderScenes(); renderStudioGroups(); renderStudio(); renderCombo(); renderSegs(); renderMusModes();
 applyColour(S.color);
