@@ -1,0 +1,40 @@
+name: Controller report
+description: Tell us whether Glowstrip works with your strip, or ask for support for a new one
+title: "Controller: <Bluetooth name>"
+labels: ["controller"]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Bluetooth name
+      description: As shown in nRF Connect or Chrome's device list
+      placeholder: MELK-OA10 57
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App named on the box or QR code
+      placeholder: Lotus Lamp X
+  - type: textarea
+    id: services
+    attributes:
+      label: Service UUIDs
+      description: From nRF Connect after connecting
+      placeholder: "0xFFF0 with characteristics FFF3 and FFF4"
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result with Glowstrip
+      options:
+        - Everything works
+        - Connects, some controls don't work
+        - Connects, nothing changes on the strip
+        - Doesn't appear or won't connect
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Which controls didn't work? Attach btsnoop_hci.log if you made a capture (see CONTRIBUTING.md).

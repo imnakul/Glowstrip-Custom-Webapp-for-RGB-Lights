@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in Glowstrip doesn't work as expected
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Glowstrip version
+      description: Shown under the app name
+      placeholder: v1.9.1
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where
+      options:
+        - Android web app
+        - Windows desktop app
+        - Desktop browser
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Phone or PC model and strip
+      placeholder: OnePlus Nord, MELK-OA10
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Logs
+      description: Settings → Lab log and Last background check, if relevant

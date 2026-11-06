@@ -1,2 +1,6 @@
 desktop/
 .github/
+docs/
+CHANGELOG.md
+CONTRIBUTING.md
+scripts/

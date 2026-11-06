@@ -1,17 +1,53 @@
 name: Desktop app
 
 # Builds the Windows installer and publishes it as a GitHub Release.
-# Runs when a tag like desktop-v1.9.0 is pushed, or manually from the Actions tab.
+#
+# Runs automatically on every push to main that touches the app. It only
+# publishes when the version in desktop/src-tauri/tauri.conf.json has no
+# release yet, so bumping that version is what ships a new desktop build.
+# Can also be started by hand from the Actions tab.
 on:
   push:
-    tags: ["desktop-v*"]
+    branches: [main]
+    paths:
+      - index.html
+      - manifest.webmanifest
+      - icons/**
+      - desktop/**
+      - .github/workflows/desktop.yml
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      exists: ${{ steps.v.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "desktop-v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release desktop-v$version already exists; nothing to publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
   windows:
+    needs: check
+    if: needs.check.outputs.exists != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +75,11 @@ jobs:
           tagName: desktop-v__VERSION__
           releaseName: Glowstrip Desktop v__VERSION__
           releaseBody: |
-            Windows installer for Glowstrip.
-            Download the `-setup.exe` file below and run it. If Windows SmartScreen warns about an unknown publisher, choose More info → Run anyway (the app isn't code-signed).
+            Windows installer for Glowstrip ${{ needs.check.outputs.version }}.
+
+            Download `Glowstrip_${{ needs.check.outputs.version }}_x64-setup.exe` below and run it.
+            Windows SmartScreen may warn about an unknown publisher because the app isn't code-signed: choose **More info → Run anyway**.
+
+            The web app (PWA) is always at https://glowstrip.vercel.app
           releaseDraft: false
           prerelease: false

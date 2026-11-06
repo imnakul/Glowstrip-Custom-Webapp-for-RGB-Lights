@@ -1,6 +1,6 @@
 // Glowstrip service worker: network first so new deploys show up immediately,
 // cached copy when offline.
-const CACHE = "glowstrip-v1.9.0";
+const CACHE = "glowstrip-v1.9.1";
 const CORE = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", e => {

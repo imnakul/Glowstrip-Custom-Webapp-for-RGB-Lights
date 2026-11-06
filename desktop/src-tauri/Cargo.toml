@@ -1,6 +1,6 @@
 [package]
 name = "glowstrip"
-version = "1.9.0"
+version = "1.9.1"
 description = "Glowstrip desktop: control MELK-OA10 Bluetooth RGB strips"
 edition = "2021"
 

@@ -484,9 +484,10 @@ if(IS_DESKTOP){
   }});
 }
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.9.0";
+const VERSION = "1.9.1";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Studio effects tint the app with their own colour; shorter music label",
   "Keep-alive stops idle disconnects (seen on PC browsers every minute)",
   "Desktop app for Windows with native Bluetooth",
   "Music tab: strip-mic mode first, and it now stops app effects so nothing overrides it",
@@ -1264,6 +1265,7 @@ function runStream(label, fn, real){
   };
   show("stream", link.ok ? "Starting " + label + "…" : label, {c:[0,0,0]});
   const first = tick();
+  { const c0 = S.view.c; if(c0 && c0[0]+c0[1]+c0[2] > 60) setAccent(c0.map(v=>clamp(Math.round(v),0,255))); }
   studioTimer=ticker.every(tick, 60);
   bgStart(label);
   if(!link.ok && !playlist) toast("Previewing only. Connect the strip to stream it.");
@@ -1476,7 +1478,7 @@ function setDevMic(on, quiet){
   if(on){
     selTok++; stopPlaylist(); stopStudio(); stopMusic(true); clearActive();
     link.send("micSens", P.micSens(Math.round($("#devSens").value*2.55)));
-    show("mode", "Reacting to music (strip mic)", {fn: beatPreview});
+    show("mode", "Reacting to music", {fn: beatPreview});
     bgStart("Reacting to music");          // keeps Bluetooth alive in the background
     if(!quiet) toast(link.ok ? "Strip is listening to the room" : "Connect the strip to use its mic");
   }else{
