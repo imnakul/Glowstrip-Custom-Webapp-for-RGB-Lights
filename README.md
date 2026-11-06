@@ -26,6 +26,7 @@ Command IDs from the community reverse engineering at https://github.com/l0lsec/
 ## Versions
 The current version shows under the app name and in Settings → About. With every change, bump `VERSION`, `RELEASED` and `NOTES` at the top of the script in `index.html`, and `CACHE` in `sw.js`.
 
+- **1.5.0** (6 Nov 2026): effects and scenes show a spinner until their first frame reaches the strip, then turn active; rapid taps only activate the last one; skip duplicate stream frames and pace writes to the controller's speed; Lab shows average write time
 - **1.4.2** (6 Nov 2026): fix content jumping on tab switch; each tab remembers its scroll position
 - **1.4.1** (6 Nov 2026): fix bottom bar jumping on tab switch (horizontal overflow made Chrome rescale the page); splash now continues from Android's launch icon; non-blocking fonts; service worker falls back to cache after 1.2 s on slow networks
 - **1.4.0** (6 Nov 2026): animated splash with the wave logo; power button off until connected (tap to connect); sliding tab indicator, panel transitions, press feedback, colour fades, light haptics

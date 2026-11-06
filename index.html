@@ -148,6 +148,11 @@ nav.tabs button{position:relative;z-index:1}
 nav.tabs svg{transition:color .25s,filter .25s}
 nav.tabs button{transition:color .25s}
 
+.tile[data-state="pending"]{border-color:var(--seam);box-shadow:none}
+.tile[data-state="pending"]::after{content:"";position:absolute;bottom:14px;right:14px;width:14px;height:14px;border-radius:50%;border:2px solid var(--seam);border-top-color:var(--glow);animation:spin .7s linear infinite}
+.tile[data-state="pending"] .nm{opacity:.7}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 /* splash */
 #splash{position:fixed;inset:0;z-index:50;background:var(--room);display:grid;place-items:center;transition:opacity .5s ease,visibility .5s}
 #splash.out{opacity:0;visibility:hidden}
@@ -365,6 +370,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
     <p class="hint">Send raw bytes to the strip and see replies. Useful for testing new commands. Frames are 9 bytes, like 7e070503ff000010ef.</p>
     <div class="row"><input class="hexin" id="rawHex" placeholder="7e 07 05 03 ff 00 00 10 ef" aria-label="Raw hex"><button class="btn" id="rawSend">Send</button></div>
     <div class="log" id="log" style="margin-top:10px" aria-live="polite"></div>
+    <p class="hint" id="bleStat">Write timing appears here once connected.</p>
     <div class="btns"><button class="btn" id="disc">Disconnect</button></div>
     <h2>About</h2>
     <p class="hint" style="margin-bottom:4px">Glowstrip <b id="verTxt" style="color:var(--ink)"></b>, released <span id="verDate"></span></p>
@@ -388,9 +394,12 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 (() => {
 "use strict";
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.4.2";
+const VERSION = "1.5.0";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Effects show a spinner until they actually reach the strip, then turn active; quick taps only activate the last one",
+  "Less Bluetooth lag: repeated identical frames are skipped and sending slows down for slow controllers",
+  "Lab shows the average Bluetooth write time",
   "Fix: content no longer jumps when switching tabs; each tab remembers where you scrolled to",
   "Fix: bottom bar no longer jumps when switching tabs",
   "Splash continues straight from Android's launch screen, no dark restart",
@@ -432,25 +441,47 @@ const hex = u8 => [...u8].map(b=>b.toString(16).padStart(2,"0")).join(" ");
 
 /* ---------- Bluetooth link with coalescing queue ---------- */
 const link = {
-  dev:null, ch:null, busy:false, pend:new Map(), order:[],
+  dev:null, ch:null, busy:false, pend:new Map(), order:[], last:new Map(), avg:0, n:0,
   get ok(){ return !!this.ch; },
-  send(key, u8){ // newest frame per key wins
-    if(!this.pend.has(key)) this.order.push(key);
-    this.pend.set(key,u8);
-    this.pump();
-    if(!this.ok) logLine("· " + hex(u8) + "  (not connected)");
+  // Queue a frame. Newest frame per key wins. Resolves once that frame (or a newer
+  // one with the same key) has been written to the strip, or at once when offline.
+  send(key, u8){
+    return new Promise(res => {
+      const prev = this.pend.get(key);
+      if(!prev){
+        // skip a stream frame identical to the one already on the strip
+        const sent = this.last.get(key);
+        if(key==="stream" && sent && sent.every((v,i)=>v===u8[i]) && this.ok){ res(true); return; }
+        this.order.push(key);
+      }
+      this.pend.set(key, {u8, w: prev ? [...prev.w, res] : [res]});
+      if(!this.ok){
+        logLine("· " + hex(u8) + "  (not connected)");
+        this.pend.get(key).w.forEach(f=>f(false)); this.pend.get(key).w = [];
+        return;
+      }
+      this.pump();
+    });
   },
   async pump(){
     if(this.busy || !this.ok) return;
     this.busy = true;
     while(this.order.length && this.ok){
-      const k = this.order.shift(), u8 = this.pend.get(k); this.pend.delete(k);
+      const k = this.order.shift(), it = this.pend.get(k); this.pend.delete(k);
+      const t0 = performance.now();
       try{
-        if(this.ch.writeValueWithoutResponse) await this.ch.writeValueWithoutResponse(u8);
-        else await this.ch.writeValue(u8);
-        if(k!=="stream") logLine("→ " + hex(u8));
+        if(this.ch.writeValueWithoutResponse) await this.ch.writeValueWithoutResponse(it.u8);
+        else await this.ch.writeValue(it.u8);
+        this.last.set(k, it.u8);
+        const ms = performance.now() - t0;
+        this.avg = this.n ? this.avg*0.85 + ms*0.15 : ms; this.n++;
+        if(k!=="stream") logLine("→ " + hex(it.u8) + "  " + Math.round(ms) + " ms");
+        const st = document.getElementById("bleStat");
+        if(st && this.n % 5 === 1) st.textContent = `Average write time ${Math.round(this.avg)} ms over ${this.n} writes`;
       }catch(e){ logLine("✕ " + e.message); }
-      await new Promise(r=>setTimeout(r,28));
+      it.w.forEach(f=>f(true));
+      // give slow controllers room: wait longer if writes are slow
+      await new Promise(r=>setTimeout(r, Math.max(15, Math.min(80, this.avg*0.6))));
     }
     this.busy = false;
   }
@@ -487,6 +518,20 @@ async function connect(){
     setConn("off", link.ok ? (link.dev.name||"Connected") : "Connect strip");
     if(e.name!=="NotFoundError") toast("Couldn't connect: " + e.message + ". Close the Lotus app and try again.");
   }
+}
+let selTok = 0;
+// Show a spinner on the chosen tile until its first frame reaches the strip; only
+// then mark it active. A newer tap cancels an older pending one.
+function pendingSelect(gridSel, match, sendPromise, onDone){
+  const tok = ++selTok;
+  $$(".tile[data-state=pending]").forEach(x=>x.removeAttribute("data-state"));
+  const tile = $$(gridSel + " .tile").find(match);
+  if(tile && link.ok) tile.dataset.state = "pending";
+  sendPromise.then(() => {
+    if(tok !== selTok) return;
+    if(tile) tile.removeAttribute("data-state");
+    onDone();
+  });
 }
 function setConn(state, txt){ $("#connBtn").dataset.state=state; $("#connTxt").textContent=txt; }
 $("#connBtn").onclick = () => link.ok ? toast("Already connected to " + (link.dev.name||"strip")) : connect();
@@ -741,11 +786,15 @@ function renderFx(){
 }
 function playMode(id, fromPlaylist){
   if(!fromPlaylist) stopPlaylist();
-  stopStudio(); stopMusic(true); curMode=id;
-  link.send("mode", P.mode(id));
-  show("mode", MODE_NAMES[id], {fn: patternFor(MODE_NAMES[id])});
+  stopStudio(); stopMusic(true); curMode=null;
+  $$("#fxGrid .tile").forEach(x=>x.setAttribute("aria-pressed", false));
+  const sent = link.send("mode", P.mode(id));
+  show("mode", link.ok ? "Starting " + MODE_NAMES[id] + "…" : MODE_NAMES[id], {fn: patternFor(MODE_NAMES[id])});
   const c = coloursFromName(MODE_NAMES[id]).find(Array.isArray); if(c) setAccent(c);
-  $$("#fxGrid .tile").forEach(x=>x.setAttribute("aria-pressed", +x.dataset.id===id));
+  pendingSelect("#fxGrid", x=>+x.dataset.id===id, sent, () => {
+    curMode=id; $("#nowTxt").textContent = MODE_NAMES[id];
+    $$("#fxGrid .tile").forEach(x=>x.setAttribute("aria-pressed", +x.dataset.id===id));
+  });
 }
 $("#fxSearch").oninput = () => { renderCats(); renderFx(); };
 
@@ -756,7 +805,15 @@ function renderScenes(){
     const b=document.createElement("button"); b.className="tile";
     b.style.setProperty("--bar","linear-gradient(90deg,var(--wall-2),var(--glow))");
     b.innerHTML=`<span class="bar"></span><span class="nm">${n}</span><span class="id">Scene ${id}</span>`;
-    b.onclick=()=>{ stopPlaylist(); stopStudio(); stopMusic(true); link.send("scene",P.scene(id)); show("mode", n+" scene", {fn:patternFor("Auto Play")}); toast(n+" scene sent"); };
+    b.dataset.scene=id;
+    b.onclick=()=>{ stopPlaylist(); stopStudio(); stopMusic(true);
+      $$("#sceneGrid .tile").forEach(x=>x.setAttribute("aria-pressed", false));
+      const sent = link.send("scene",P.scene(id));
+      show("mode", link.ok ? "Starting " + n + " scene…" : n+" scene", {fn:patternFor("Auto Play")});
+      pendingSelect("#sceneGrid", x=>+x.dataset.scene===id, sent, () => {
+        $("#nowTxt").textContent = n + " scene";
+        $$("#sceneGrid .tile").forEach(x=>x.setAttribute("aria-pressed", +x.dataset.scene===id));
+      }); };
     g.appendChild(b);
   });
 }
@@ -853,16 +910,23 @@ function runStream(label, fn, real){
     const now=performance.now(), dt=(now-last)/1000; last=now;
     tAcc += dt*(0.3+S.spd/100*1.7);
     const c = fn(real ? (now-start)/1000 : tAcc, HX($("#stA").value), HX($("#stB").value));
-    link.send("stream", P.color(...c.map(v=>clamp(Math.round(v),0,255))));
+    const p = link.send("stream", P.color(...c.map(v=>clamp(Math.round(v),0,255))));
     S.view.c = c;
+    return p;
   };
-  show("stream", label, {c:[0,0,0]}); tick();
+  show("stream", link.ok ? "Starting " + label + "…" : label, {c:[0,0,0]});
+  const first = tick();
   studioTimer=setInterval(tick, 60);
   if(!link.ok && !playlist) toast("Previewing only. Connect the strip to stream it.");
+  first.then(() => { if(S.view.kind==="stream") $("#nowTxt").textContent = label; });
+  return first;
 }
 function startStudio(n, fromPlaylist){
   if(!fromPlaylist) stopPlaylist();
-  const e=STUDIO[n]; runStream(n, e.f, e.real); studioName=n; markStudio();
+  const e=STUDIO[n];
+  studioName=null; markStudio();
+  const first = runStream(n, e.f, e.real);
+  pendingSelect("#studioGrid", x=>x.dataset.n===n, first, () => { studioName=n; markStudio(); });
 }
 function markStudio(){ $$("#studioGrid .tile").forEach(x=>x.setAttribute("aria-pressed", x.dataset.n===studioName)); }
 function stopStudio(){ if(studioTimer){ clearInterval(studioTimer); studioTimer=null; const had=studioName; studioName=null; if(had) markStudio(); } }
