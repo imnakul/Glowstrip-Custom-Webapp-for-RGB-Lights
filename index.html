@@ -380,7 +380,9 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
     <h2>Running in the background</h2>
     <div class="field"><span>Keep effects and music running when the app is in the background<br><span class="hint" style="margin:0">Shows a Glowstrip media notification you can stop from</span></span><button class="switch" id="bgRun" role="switch" aria-label="Run in background"></button></div>
     <div class="field"><span>Keep the screen on while effects run<br><span class="hint" style="margin:0">Most reliable; uses more battery</span></span><button class="switch" id="keepAwake" role="switch" aria-label="Keep screen on"></button></div>
-    <p class="hint">Some phones (OnePlus, Oppo, Xiaomi, Vivo) still close background apps. If effects stop, set Chrome's battery usage to Unrestricted in Android settings.</p>
+    <p class="hint">Glowstrip runs inside Chrome, so Android must allow <b>Chrome</b> in the background too, not only Glowstrip. In Android settings, set both to Always allow / Unrestricted.</p>
+    <h3>Last background check</h3>
+    <div class="log" id="bgLog" style="height:120px">Nothing recorded yet.</div>
     <h2>Lab</h2>
     <p class="hint">Send raw bytes to the strip and see replies. Useful for testing new commands. Frames are 9 bytes, like 7e070503ff000010ef.</p>
     <div class="row"><input class="hexin" id="rawHex" placeholder="7e 07 05 03 ff 00 00 10 ef" aria-label="Raw hex"><button class="btn" id="rawSend">Send</button></div>
@@ -422,9 +424,12 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 (() => {
 "use strict";
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.7.0";
+const VERSION = "1.7.1";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Background fix: the keep-alive track is now longer than 5 s, which Chrome needs before it shows the media notification",
+  "Music starts the keep-alive during your tap, before the mic prompt",
+  "Settings shows a background check: how long the app kept running and why it stopped",
   "Studio effects, combos, shuffle and music keep running in the background, with a media notification to stop them",
   "Optional: keep the screen on while effects run",
   "Scenes, effects and combos show a spinner while switching; only one item is ever marked active",
@@ -642,21 +647,26 @@ const ticker = (() => {
 
 const bg = { audio:null, lock:null, label:"" };
 function silentWavUrl(){
-  // 2 s of 8 kHz audio at ±1 LSB: inaudible, but counts as playing media
-  const n = 16000, buf = new ArrayBuffer(44 + n*2), v = new DataView(buf);
+  // 30 s of 8 kHz 8-bit audio at ±1 step: inaudible, but long enough (>5 s) for
+  // Chrome on Android to show a media notification and keep the app alive.
+  const rate = 8000, n = rate*30, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
   const w = (o,str) => [...str].forEach((c,i)=>v.setUint8(o+i,c.charCodeAt(0)));
-  w(0,"RIFF"); v.setUint32(4,36+n*2,true); w(8,"WAVE"); w(12,"fmt "); v.setUint32(16,16,true);
-  v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,8000,true); v.setUint32(28,16000,true);
-  v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,"data"); v.setUint32(40,n*2,true);
-  for(let i=0;i<n;i++) v.setInt16(44+i*2, (i%2)?1:-1, true);
+  w(0,"RIFF"); v.setUint32(4,36+n,true); w(8,"WAVE"); w(12,"fmt "); v.setUint32(16,16,true);
+  v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,rate,true); v.setUint32(28,rate,true);
+  v.setUint16(32,1,true); v.setUint16(34,8,true); w(36,"data"); v.setUint32(40,n,true);
+  for(let i=0;i<n;i++) v.setUint8(44+i, (i%2) ? 129 : 127);
   return URL.createObjectURL(new Blob([buf],{type:"audio/wav"}));
 }
 async function bgStart(label){
   bg.label = label;
   if(store.get("bgRun", true)){
     try{
-      if(!bg.audio){ bg.audio = new Audio(silentWavUrl()); bg.audio.loop = true; bg.audio.setAttribute("playsinline",""); }
-      if(bg.audio.paused) await bg.audio.play();
+      if(!bg.audio){
+        bg.audio = new Audio(silentWavUrl()); bg.audio.loop = true; bg.audio.setAttribute("playsinline","");
+        bg.audio.addEventListener("pause", () => { if(bg.want) bg.audio.play().catch(e => bgDiag("audio resume failed: " + e.message)); });
+      }
+      bg.want = true;
+      if(bg.audio.paused) await bg.audio.play().catch(e => { bgDiag("audio blocked: " + e.message); });
     }catch{}
     if("mediaSession" in navigator){
       try{
@@ -674,10 +684,42 @@ async function bgStart(label){
   }
 }
 function bgStop(){
+  bg.want = false;
   if(bg.audio && !bg.audio.paused) bg.audio.pause();
   if("mediaSession" in navigator){ try{ navigator.mediaSession.playbackState = "none"; navigator.mediaSession.metadata = null; }catch{} }
   if(bg.lock){ bg.lock.release().catch(()=>{}); bg.lock = null; }
 }
+// --- background check: record a heartbeat every second while something is running.
+// If Android freezes the app, the heartbeats stop; on return we report the gap.
+const bgLog = [];
+function bgDiag(msg){ const t = new Date().toLocaleTimeString(); bgLog.push(t + "  " + msg); if(bgLog.length>40) bgLog.shift(); renderBgLog(); }
+function renderBgLog(){ const el = document.getElementById("bgLog"); if(el) el.textContent = bgLog.length ? bgLog.join("\n") : "Nothing recorded yet."; }
+let hb = null, hiddenAt = 0, beatsHidden = 0, framesAtHide = 0;
+function bgActive(){ return !!(studioTimer || mus || playlist); }
+hb = ticker.every(() => {
+  if(document.visibilityState === "hidden" && bgActive()){
+    beatsHidden++;
+    store.set("bgBeat", {t: Date.now(), n: beatsHidden, audio: bg.audio ? !bg.audio.paused : false,
+      ac: mus ? mus.ac.state : "-", mic: mus ? mus.stream.getAudioTracks()[0]?.readyState : "-", ble: link.ok, frames: link.n});
+  }
+}, 1000);
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "hidden"){
+    if(bgActive()){
+      hiddenAt = Date.now(); beatsHidden = 0; framesAtHide = link.n;
+      bgDiag(`went to background · media ${bg.audio && !bg.audio.paused ? "playing" : "NOT playing"} · notification ${"mediaSession" in navigator && navigator.mediaSession.playbackState==="playing" ? "set" : "missing"}`);
+    }
+  } else if(hiddenAt){
+    const away = Math.round((Date.now() - hiddenAt)/1000), last = store.get("bgBeat", null);
+    const ranFor = last && last.t >= hiddenAt ? Math.round((last.t - hiddenAt)/1000) : 0;
+    const sent = link.n - framesAtHide;
+    const ok = away - ranFor <= 3;
+    bgDiag(`back after ${away}s · kept running ${ranFor}s · ${sent} frames sent` +
+      (last ? ` · at last beat: media ${last.audio?"on":"off"}, mic ${last.mic}, audio engine ${last.ac}, bluetooth ${last.ble?"on":"off"}` : ""));
+    if(!ok) toast(`Android paused Glowstrip after about ${ranFor}s in the background. Details in Settings.`);
+    hiddenAt = 0;
+  }
+});
 // screen wake lock is dropped when the page is hidden; take it back on return
 document.addEventListener("visibilitychange", () => {
   if(document.visibilityState==="visible" && (studioTimer || mus) && store.get("keepAwake", false)) bgStart(bg.label);
@@ -1262,6 +1304,7 @@ function renderMusModes(){
 }
 async function startMusic(){
   stopPlaylist();
+  bgStart("Music · " + musMode);   // must start during the tap, before awaiting the mic
   try{
     const stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
     const ac = new (window.AudioContext||window.webkitAudioContext)();
@@ -1287,7 +1330,6 @@ async function startMusic(){
       S.view.c=c; link.send("stream", P.color(...c));
     };
     mus = {stream, ac, timer:ticker.every(tick,50)};
-    bgStart("Music · " + musMode);
     $("#musBtn").textContent="Stop listening";
     if(!link.ok) toast("Listening. Connect the strip to send it the beat.");
   }catch(e){ toast("Microphone blocked. Allow it in the browser's site settings."); }

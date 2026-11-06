@@ -26,6 +26,7 @@ Command IDs from the community reverse engineering at https://github.com/l0lsec/
 ## Versions
 The current version shows under the app name and in Settings → About. With every change, bump `VERSION`, `RELEASED` and `NOTES` at the top of the script in `index.html`, and `CACHE` in `sw.js`.
 
+- **1.7.1** (6 Nov 2026): keep-alive track lengthened past Chrome's 5 s media-notification threshold; music starts keep-alive inside the tap; background check log in Settings
 - **1.7.0** (6 Nov 2026): background running for studio effects, combos, shuffle and music (worker timers, media notification with stop, optional keep-screen-on); scenes, effects and combos show a spinner while switching and only one item is ever active
 - **1.6.0** (6 Nov 2026): connection sheet (tap the pill) with Disconnect, Reconnect to last strip without the picker, and Connect a different strip; quiet auto-retry when the strip drops
 - **1.5.0** (6 Nov 2026): effects and scenes show a spinner until their first frame reaches the strip, then turn active; rapid taps only activate the last one; skip duplicate stream frames and pace writes to the controller's speed; Lab shows average write time
