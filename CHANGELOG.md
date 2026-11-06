@@ -2,6 +2,7 @@
 
 All dates are release dates. The version shows under the app name and in Settings → About.
 
+- **1.10.0** (6 Nov 2026): strip-mic mode no longer loops reconnecting (drops in mic mode are left alone; three drops in 30 s pause auto-reconnect; drops logged with the command that preceded them); clear microphone errors; desktop app grants itself microphone access, has a frosted-glass window like Venu, and opens at 400×720, centred and resizable
 - **1.9.1** (6 Nov 2026): studio effects tint the app with their own colour; desktop installer is published automatically when the version changes; README, protocol notes and contribution guide
 - **1.9.0** (6 Nov 2026): keep-alive read every 20 s of silence (fixes idle drops on PC browsers); drops logged with idle time; Windows desktop app with native Bluetooth
 - **1.8.1** (6 Nov 2026): strip-mic mode is a proper mode (stops app streams, keeps Bluetooth alive in background, restored after reconnect); Music tab lists it first

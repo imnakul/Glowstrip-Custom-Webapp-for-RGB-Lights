@@ -10,9 +10,15 @@ use btleplug::api::{Central, CentralEvent, Characteristic, Manager as _, Periphe
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures::StreamExt;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager as _, State};
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+#[cfg(windows)]
+mod win;
+
+/// Whether the frosted-glass window effect took (Windows only).
+struct Glass(bool);
 
 const SERVICE: Uuid = Uuid::from_u128(0x0000fff0_0000_1000_8000_00805f9b34fb);
 const WRITE: Uuid = Uuid::from_u128(0x0000fff3_0000_1000_8000_00805f9b34fb);
@@ -206,6 +212,11 @@ async fn ble_read(st: State<'_, St>) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
+fn glass_enabled(g: State<'_, Glass>) -> bool {
+    g.0
+}
+
+#[tauri::command]
 async fn ble_disconnect(app: AppHandle, st: State<'_, St>) -> Result<(), String> {
     let old = st.lock().await.conn.take();
     if let Some(c) = old {
@@ -218,7 +229,24 @@ async fn ble_disconnect(app: AppHandle, st: State<'_, St>) -> Result<(), String>
 pub fn run() {
     tauri::Builder::default()
         .manage(St::default())
+        .setup(|app| {
+            #[allow(unused_mut)]
+            let mut glass = false;
+            if let Some(w) = app.get_webview_window("main") {
+                #[cfg(windows)]
+                {
+                    if let Ok(h) = w.hwnd() {
+                        glass = win::glass(windows::Win32::Foundation::HWND(h.0));
+                    }
+                    win::allow_microphone(&w);
+                }
+                let _ = &w;
+            }
+            app.manage(Glass(glass));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            glass_enabled,
             ble_scan,
             ble_stop_scan,
             ble_connect,

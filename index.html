@@ -163,6 +163,24 @@ nav.tabs button{transition:color .25s}
 .sheet-btns .btn{width:100%;padding:14px 16px}
 .btn.ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
 
+/* desktop app: frosted glass, same recipe as Venu's settings window */
+html.glass{background:transparent}
+html.glass body{background:transparent}
+html.glass{
+  --room: color-mix(in srgb, rgb(16,16,22) 91%, var(--glow) 9%);
+  --wall: rgba(255,255,255,.06);
+  --wall-2: rgba(255,255,255,.10);
+  --seam: rgba(255,255,255,.09);
+  --ink: #f4f4f7; --ink-2: #b2b2be; --ink-3: #80808e;
+}
+html.glass body::before{content:"";position:fixed;inset:0;z-index:-1;background:color-mix(in srgb, rgb(16,16,22) 91%, var(--glow) 9%);opacity:.7;pointer-events:none}
+html.glass nav.tabs{background:color-mix(in srgb, rgb(9,9,13) 88%, var(--glow) 12%);opacity:1;backdrop-filter:none}
+html.glass .sheet{background:rgba(22,22,29,.97)}
+html.glass .toast{background:#f4f4f7}
+html.glass #splash{background:color-mix(in srgb, rgb(16,16,22) 91%, var(--glow) 9%)}
+html.glass .log{background:rgba(0,0,0,.28)}
+html.glass input[type=color].picker,html.glass .hexin,html.glass .search{background:rgba(255,255,255,.06)}
+
 /* splash */
 #splash{position:fixed;inset:0;z-index:50;background:var(--room);display:grid;place-items:center;transition:opacity .5s ease,visibility .5s}
 #splash.out{opacity:0;visibility:hidden}
@@ -441,6 +459,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 const IS_DESKTOP = !!(window.__TAURI__ && window.__TAURI__.core);
 if(IS_DESKTOP){
   const { invoke } = window.__TAURI__.core, { listen } = window.__TAURI__.event;
+  invoke("glass_enabled").then(on => { if(on) document.documentElement.classList.add("glass"); }).catch(()=>{});
   let current = null; const notifyFns = [];
   listen("ble-disconnected", () => { if(current){ current.gatt.connected = false; current._dl.forEach(f=>f()); } });
   listen("ble-notify", e => { const dv = new DataView(new Uint8Array(e.payload).buffer); notifyFns.forEach(f=>f({target:{value:dv}})); });
@@ -484,9 +503,12 @@ if(IS_DESKTOP){
   }});
 }
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.9.1";
+const VERSION = "1.10.0";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Strip-mic mode no longer gets stuck reconnecting: a drop in mic mode is left alone, and repeated drops pause auto-reconnect",
+  "Clear microphone error messages, and the desktop app now grants itself microphone access",
+  "Desktop app: frosted-glass window like Venu, smaller default size",
   "Studio effects tint the app with their own colour; shorter music label",
   "Keep-alive stops idle disconnects (seen on PC browsers every minute)",
   "Desktop app for Windows with native Bluetooth",
@@ -577,7 +599,7 @@ const link = {
       try{
         if(this.ch.writeValueWithoutResponse) await this.ch.writeValueWithoutResponse(it.u8);
         else await this.ch.writeValue(it.u8);
-        this.last.set(k, it.u8); this.lastIO = Date.now();
+        this.last.set(k, it.u8); this.lastIO = Date.now(); this.lastKey = k; this.lastKeyAt = Date.now();
         const ms = performance.now() - t0;
         this.avg = this.n ? this.avg*0.85 + ms*0.15 : ms; this.n++;
         if(k!=="stream") logLine("→ " + hex(it.u8) + "  " + Math.round(ms) + " ms");
@@ -631,7 +653,7 @@ async function attach(dev, quiet){  // open GATT on a known device
   }catch{}
   userDisconnect = false; clearTimeout(retryTimer);
   if(link.pend.has("stream")){ link.pend.delete("stream"); link.order = link.order.filter(k=>k!=="stream"); }
-  if(S.devMic){ link.send("mic", P.micOn(true)); link.send("micSens", P.micSens(Math.round($("#devSens").value*2.55))); bgDiag("reconnected: put strip back in mic mode"); }
+
   store.set(DEV_KEY, {id: dev.id, name: dev.name});
   setConn("on", dev.name || "Connected");
   S.on = true; renderPower(); haptic([10,40,14]);
@@ -642,11 +664,29 @@ async function attach(dev, quiet){  // open GATT on a known device
 }
 const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)), ms))]);
 
+const drops = [];
 function onDropped(dev){
   if(link.dev !== dev) return;
-  bgDiag(`connection dropped (${userDisconnect ? "by you" : "by the strip or system"}) after ${Math.round((Date.now()-link.lastIO)/1000)} s without traffic`);
+  const since = link.lastKeyAt ? Date.now() - link.lastKeyAt : 0;
+  bgDiag(`connection dropped (${userDisconnect ? "by you" : "by the strip or system"}) ${Math.round(since)} ms after the "${link.lastKey||"-"}" command, ${Math.round((Date.now()-link.lastIO)/1000)} s after last traffic`);
   link.ch = null; renderPower(); renderSheet();
   if(userDisconnect){ setConn("off","Reconnect"); toast("Disconnected"); return; }
+
+  // In strip-mic mode the strip works on its own, so a drop isn't an error:
+  // don't chase it, which on some PCs turns into a connect/disconnect loop.
+  if(S.devMic){
+    setConn("off","Reconnect");
+    toast("The strip disconnected in mic mode. It may keep reacting on its own; tap the pill to reconnect.");
+    return;
+  }
+  // Repeated drops in a short time: stop retrying instead of looping
+  const now = Date.now(); drops.push(now); while(drops.length && now - drops[0] > 30000) drops.shift();
+  if(drops.length >= 3){
+    setConn("off","Reconnect");
+    toast("The strip keeps disconnecting, so auto-reconnect is paused. Details in Settings.");
+    bgDiag("auto-reconnect paused after 3 drops in 30 s");
+    return;
+  }
   // dropped by itself (out of range, strip switched off): try a few times quietly
   setConn("busy","Reconnecting…");
   let tries = 0;
@@ -665,7 +705,7 @@ function disconnect(){
 }
 
 async function reconnect(){         // reconnect to the last strip without the picker
-  clearTimeout(retryTimer);
+  clearTimeout(retryTimer); drops.length = 0;
   let dev = link.dev;
   if(!dev && navigator.bluetooth?.getDevices){
     try{ const saved = store.get(DEV_KEY,null); dev = (await navigator.bluetooth.getDevices()).find(d => saved && d.id===saved.id); }catch{}
@@ -690,7 +730,8 @@ setInterval(async () => {
    strip if it supports getDevices(); otherwise one tap on the pill reconnects. */
 let autoBusy = false;
 async function autoConnect(reason){
-  if(autoBusy || link.ok || !navigator.bluetooth || !store.get("autoConn", true)) return;
+  if(autoBusy || link.ok || !navigator.bluetooth || !store.get("autoConn", true) || S.devMic) return;
+  if(drops.length >= 3 && Date.now() - drops[drops.length-1] < 30000) return;
   const saved = store.get(DEV_KEY, null);
   if(!saved && !link.dev) return;
   let dev = link.dev;
@@ -1460,7 +1501,17 @@ async function startMusic(){
     mus = {stream, ac, timer:ticker.every(tick,50)};
     $("#musBtn").textContent="Stop listening";
     if(!link.ok) toast("Listening. Connect the strip to send it the beat.");
-  }catch(e){ toast("Microphone blocked. Allow it in the browser's site settings."); }
+  }catch(e){
+    bgStop();
+    const n = e && e.name;
+    const msg = n==="NotAllowedError" ? (IS_DESKTOP
+        ? "Windows blocked the microphone. Open Windows Settings → Privacy & security → Microphone and turn on \"Let desktop apps access your microphone\"."
+        : "Microphone blocked. Allow it for this site in Chrome's site settings.")
+      : n==="NotFoundError" ? "No microphone found. Plug one in or check it's enabled in your system's sound settings."
+      : n==="NotReadableError" ? "The microphone is in use by another app, or the system blocked it."
+      : "Couldn't start the microphone: " + (e && e.message || n || "unknown error");
+    toast(msg); bgDiag("microphone: " + (n||"") + " " + (e && e.message || ""));
+  }
 }
 function stopMusic(silent){
   if(mus && !studioTimer) bgStop();
@@ -1479,7 +1530,7 @@ function setDevMic(on, quiet){
     selTok++; stopPlaylist(); stopStudio(); stopMusic(true); clearActive();
     link.send("micSens", P.micSens(Math.round($("#devSens").value*2.55)));
     show("mode", "Reacting to music", {fn: beatPreview});
-    bgStart("Reacting to music");          // keeps Bluetooth alive in the background
+    if(link.ok) bgStart("Reacting to music");   // keeps Bluetooth alive in the background
     if(!quiet) toast(link.ok ? "Strip is listening to the room" : "Connect the strip to use its mic");
   }else{
     bgStop();
