@@ -178,6 +178,7 @@ nav.tabs button{transition:color .25s}
 @keyframes rise{to{opacity:1;transform:translate(-50%,0)}}
 
 /* settings */
+.field span.hint{display:block;color:var(--ink-2);font-size:.86rem;margin-top:2px}
 .field{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--seam)}
 .field:last-child{border-bottom:0}
 .field input[type=number]{width:96px;background:var(--wall);border:1px solid var(--seam);border-radius:8px;padding:8px 10px}
@@ -294,7 +295,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
   <!-- STUDIO (app-driven) -->
   <section class="panel" id="p-studio" role="tabpanel">
     <h2>Studio effects</h2>
-    <p class="hint">Made by this app and streamed to the strip, so they run while this page is open. The whole strip changes colour together.</p>
+    <p class="hint">Made by this app and streamed to the strip. They keep running in the background (see Settings). The whole strip changes colour together.</p>
     <div class="chips" id="studioGroups" role="group" aria-label="Effect groups"></div>
     <div class="grid" id="studioGrid"></div>
     <div class="row" style="margin-top:12px;flex-wrap:wrap">
@@ -376,6 +377,10 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
       <select id="offTimer" class="search" style="width:auto;margin:0">
         <option value="0">Never</option><option value="900">15 min</option><option value="1800">30 min</option><option value="3600">1 hour</option><option value="7200">2 hours</option>
       </select></div>
+    <h2>Running in the background</h2>
+    <div class="field"><span>Keep effects and music running when the app is in the background<br><span class="hint" style="margin:0">Shows a Glowstrip media notification you can stop from</span></span><button class="switch" id="bgRun" role="switch" aria-label="Run in background"></button></div>
+    <div class="field"><span>Keep the screen on while effects run<br><span class="hint" style="margin:0">Most reliable; uses more battery</span></span><button class="switch" id="keepAwake" role="switch" aria-label="Keep screen on"></button></div>
+    <p class="hint">Some phones (OnePlus, Oppo, Xiaomi, Vivo) still close background apps. If effects stop, set Chrome's battery usage to Unrestricted in Android settings.</p>
     <h2>Lab</h2>
     <p class="hint">Send raw bytes to the strip and see replies. Useful for testing new commands. Frames are 9 bytes, like 7e070503ff000010ef.</p>
     <div class="row"><input class="hexin" id="rawHex" placeholder="7e 07 05 03 ff 00 00 10 ef" aria-label="Raw hex"><button class="btn" id="rawSend">Send</button></div>
@@ -417,9 +422,12 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 (() => {
 "use strict";
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.6.0";
+const VERSION = "1.7.0";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Studio effects, combos, shuffle and music keep running in the background, with a media notification to stop them",
+  "Optional: keep the screen on while effects run",
+  "Scenes, effects and combos show a spinner while switching; only one item is ever marked active",
   "Tap the connection pill for Disconnect, Reconnect and Connect a different strip",
   "Reconnect goes straight to your last strip, no picker",
   "If the strip drops by itself, the app retries quietly up to 3 times",
@@ -609,15 +617,85 @@ function renderSheet(){
 }
 function openSheet(){ renderSheet(); $("#connSheet").classList.add("open"); $("#connSheet").setAttribute("aria-hidden","false"); }
 function closeSheet(){ $("#connSheet").classList.remove("open"); $("#connSheet").setAttribute("aria-hidden","true"); }
+/* ---------- background running ----------
+   Android pauses web apps when they leave the screen. Three things keep effects going:
+   1. timers run in a Web Worker, which the page throttling doesn't slow down
+   2. an inaudible looping track makes Chrome treat the app as "playing media",
+      so it gets a media notification and Android keeps it alive
+   3. optional: keep the screen on while effects run                                  */
+const ticker = (() => {
+  let w = null, id = 0; const subs = new Map();
+  function ensure(){
+    if(w !== null) return;
+    try{
+      const src = "const t={};onmessage=e=>{const d=e.data;if(d.c){clearInterval(t[d.id]);delete t[d.id]}else t[d.id]=setInterval(()=>postMessage(d.id),d.ms)}";
+      w = new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})));
+      w.onmessage = e => { const f = subs.get(e.data); if(f) f(); };
+    }catch{ w = false; }
+  }
+  return { every(fn, ms){
+    ensure(); const i = ++id;
+    if(w){ subs.set(i, fn); w.postMessage({id:i, ms}); return { clear(){ subs.delete(i); w.postMessage({id:i, c:1}); } }; }
+    const h = setInterval(fn, ms); return { clear(){ clearInterval(h); } };
+  } };
+})();
+
+const bg = { audio:null, lock:null, label:"" };
+function silentWavUrl(){
+  // 2 s of 8 kHz audio at ±1 LSB: inaudible, but counts as playing media
+  const n = 16000, buf = new ArrayBuffer(44 + n*2), v = new DataView(buf);
+  const w = (o,str) => [...str].forEach((c,i)=>v.setUint8(o+i,c.charCodeAt(0)));
+  w(0,"RIFF"); v.setUint32(4,36+n*2,true); w(8,"WAVE"); w(12,"fmt "); v.setUint32(16,16,true);
+  v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,8000,true); v.setUint32(28,16000,true);
+  v.setUint16(32,2,true); v.setUint16(34,16,true); w(36,"data"); v.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++) v.setInt16(44+i*2, (i%2)?1:-1, true);
+  return URL.createObjectURL(new Blob([buf],{type:"audio/wav"}));
+}
+async function bgStart(label){
+  bg.label = label;
+  if(store.get("bgRun", true)){
+    try{
+      if(!bg.audio){ bg.audio = new Audio(silentWavUrl()); bg.audio.loop = true; bg.audio.setAttribute("playsinline",""); }
+      if(bg.audio.paused) await bg.audio.play();
+    }catch{}
+    if("mediaSession" in navigator){
+      try{
+        navigator.mediaSession.metadata = new MediaMetadata({ title: label, artist: "Glowstrip", album: link.dev?.name || "RGB strip",
+          artwork: [{src:"/icons/icon-192.png",sizes:"192x192",type:"image/png"},{src:"/icons/icon-512.png",sizes:"512x512",type:"image/png"}] });
+        navigator.mediaSession.playbackState = "playing";
+        const stopAll = () => { stopPlaylist(); stopStudio(); stopMusic(true); bgStop(); toast("Stopped"); };
+        navigator.mediaSession.setActionHandler("pause", stopAll);
+        navigator.mediaSession.setActionHandler("stop", stopAll);
+      }catch{}
+    }
+  }
+  if(store.get("keepAwake", false) && "wakeLock" in navigator && !bg.lock){
+    try{ bg.lock = await navigator.wakeLock.request("screen"); bg.lock.addEventListener("release", () => bg.lock = null); }catch{}
+  }
+}
+function bgStop(){
+  if(bg.audio && !bg.audio.paused) bg.audio.pause();
+  if("mediaSession" in navigator){ try{ navigator.mediaSession.playbackState = "none"; navigator.mediaSession.metadata = null; }catch{} }
+  if(bg.lock){ bg.lock.release().catch(()=>{}); bg.lock = null; }
+}
+// screen wake lock is dropped when the page is hidden; take it back on return
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState==="visible" && (studioTimer || mus) && store.get("keepAwake", false)) bgStart(bg.label);
+});
+
 let selTok = 0;
 // Show a spinner on the chosen tile until its first frame reaches the strip; only
 // then mark it active. A newer tap cancels an older pending one.
+function clearActive(){ $$("#fxGrid .tile, #sceneGrid .tile, #studioGrid .tile, #comboPresets .chip").forEach(x=>x.setAttribute("aria-pressed", false)); }
 function pendingSelect(gridSel, match, sendPromise, onDone){
   const tok = ++selTok;
   $$(".tile[data-state=pending]").forEach(x=>x.removeAttribute("data-state"));
+  clearActive();
   const tile = $$(gridSel + " .tile").find(match);
   if(tile && link.ok) tile.dataset.state = "pending";
-  sendPromise.then(() => {
+  // keep the spinner up at least briefly so the switch is visible, even on fast strips
+  const minShow = link.ok ? new Promise(r=>setTimeout(r, 450)) : Promise.resolve();
+  Promise.all([sendPromise, minShow]).then(() => {
     if(tok !== selTok) return;
     if(tile) tile.removeAttribute("data-state");
     onDone();
@@ -827,6 +905,9 @@ function renderSwatches(el, list, removable){
 let favs = store.get("favs", []);
 function renderFavs(){ renderSwatches($("#favs"), favs, true); $("#favsEmpty").hidden = favs.length>0; }
 function applyColour(c, fromSlider){
+  if(!fromSlider){ selTok++; $$('.tile[data-state=pending]').forEach(x=>x.removeAttribute('data-state')); }
+  if(typeof clearActive==='function') clearActive();
+  if(typeof bgStop==='function' && !mus) bgStop();
   if(typeof stopPlaylist==='function') stopPlaylist();
   S.color = c; store.set("color", c); stopStudio(); stopMusic(true);
   link.send("stream", P.color(...c));
@@ -885,7 +966,7 @@ function renderFx(){
   });
 }
 function playMode(id, fromPlaylist){
-  if(!fromPlaylist) stopPlaylist();
+  if(!fromPlaylist){ stopPlaylist(); if(!mus) bgStop(); }
   stopStudio(); stopMusic(true); curMode=null;
   $$("#fxGrid .tile").forEach(x=>x.setAttribute("aria-pressed", false));
   const sent = link.send("mode", P.mode(id));
@@ -906,7 +987,7 @@ function renderScenes(){
     b.style.setProperty("--bar","linear-gradient(90deg,var(--wall-2),var(--glow))");
     b.innerHTML=`<span class="bar"></span><span class="nm">${n}</span><span class="id">Scene ${id}</span>`;
     b.dataset.scene=id;
-    b.onclick=()=>{ stopPlaylist(); stopStudio(); stopMusic(true);
+    b.onclick=()=>{ stopPlaylist(); stopStudio(); stopMusic(true); bgStop();
       $$("#sceneGrid .tile").forEach(x=>x.setAttribute("aria-pressed", false));
       const sent = link.send("scene",P.scene(id));
       show("mode", link.ok ? "Starting " + n + " scene…" : n+" scene", {fn:patternFor("Auto Play")});
@@ -1016,7 +1097,8 @@ function runStream(label, fn, real){
   };
   show("stream", link.ok ? "Starting " + label + "…" : label, {c:[0,0,0]});
   const first = tick();
-  studioTimer=setInterval(tick, 60);
+  studioTimer=ticker.every(tick, 60);
+  bgStart(label);
   if(!link.ok && !playlist) toast("Previewing only. Connect the strip to stream it.");
   first.then(() => { if(S.view.kind==="stream") $("#nowTxt").textContent = label; });
   return first;
@@ -1029,8 +1111,8 @@ function startStudio(n, fromPlaylist){
   pendingSelect("#studioGrid", x=>x.dataset.n===n, first, () => { studioName=n; markStudio(); });
 }
 function markStudio(){ $$("#studioGrid .tile").forEach(x=>x.setAttribute("aria-pressed", x.dataset.n===studioName)); }
-function stopStudio(){ if(studioTimer){ clearInterval(studioTimer); studioTimer=null; const had=studioName; studioName=null; if(had) markStudio(); } }
-$("#stopStudio").onclick=()=>{ stopPlaylist(); stopStudio(); applyColour(S.color); };
+function stopStudio(){ if(studioTimer){ studioTimer.clear(); studioTimer=null; const had=studioName; studioName=null; if(had) markStudio(); } }
+$("#stopStudio").onclick=()=>{ stopPlaylist(); stopStudio(); bgStop(); applyColour(S.color); };
 $("#stA").oninput=$("#stB").oninput=renderStudio;
 
 /* ---------- colour combo builder ---------- */
@@ -1067,7 +1149,7 @@ function renderCombo(){
   $("#comboHold").value=combo.hold; $("#comboHoldOut").textContent=combo.hold+" s";
   const P_=$("#comboPresets"); P_.innerHTML="";
   [...savedCombos.map((c,i)=>["★ "+(c.name||("Saved "+(i+1))), c, i]), ...Object.entries(COMBO_PRESETS).map(([n,c])=>[n,{cols:c},-1])].forEach(([n,c,i])=>{
-    const b=document.createElement("button"); b.className="chip"; b.textContent=n;
+    const b=document.createElement("button"); b.className="chip"; b.textContent=n; b.dataset.cols=c.cols.join(",");
     b.style.backgroundImage=`linear-gradient(90deg,${c.cols.map(x=>x+"33").join(",")})`;
     b.onclick=()=>{ combo={...combo, ...c, cols:[...c.cols]}; renderCombo(); playCombo(); };
     if(i>=0) b.oncontextmenu=e=>{ e.preventDefault(); savedCombos.splice(i,1); store.set("savedCombos",savedCombos); renderCombo(); toast("Removed saved combo"); };
@@ -1077,8 +1159,16 @@ function renderCombo(){
 function playCombo(fromPlaylist){
   if(!fromPlaylist) stopPlaylist();
   const c={...combo, cols:combo.cols.map(HX)}, fn=COMBO_STYLES[c.style];
-  runStream(`${c.style} combo · ${c.cols.length} colours`, t=>fn(c.cols, t/c.hold*1.0), false);
+  const btn=$("#comboPlay"), key=combo.cols.join(",");
+  const first = runStream(`${c.style} combo · ${c.cols.length} colours`, t=>fn(c.cols, t/c.hold*1.0), false);
   setAccent(c.cols[0]);
+  const tok = ++selTok; clearActive();
+  if(link.ok){ btn.disabled = true; btn.textContent = "Starting…"; }
+  Promise.all([first, link.ok ? new Promise(r=>setTimeout(r,450)) : 0]).then(() => {
+    btn.disabled = false; btn.textContent = "Play combo";
+    if(tok !== selTok) return;
+    $$("#comboPresets .chip").forEach(x=>x.setAttribute("aria-pressed", x.dataset.cols===key));
+  });
 }
 $("#comboHold").oninput=e=>{ combo.hold=+e.target.value; $("#comboHoldOut").textContent=combo.hold+" s"; store.set("combo",combo); };
 $("#comboPlay").onclick=()=>playCombo();
@@ -1088,7 +1178,7 @@ $("#comboSave").onclick=()=>{ const name=prompt("Name this combo", combo.style+"
 
 /* ---------- shuffle playlist ---------- */
 let playlist=null;
-function stopPlaylist(){ if(playlist){ clearInterval(playlist.timer); playlist=null; $("#plBtn").textContent="Start shuffle"; } }
+function stopPlaylist(){ if(playlist){ playlist.timer.clear(); playlist=null; $("#plBtn").textContent="Start shuffle"; } }
 function startPlaylist(){
   const src=$("#plSrc").value, every=+$("#plEvery").value;
   let pool=[];
@@ -1099,7 +1189,7 @@ function startPlaylist(){
   if(!pool.length){ toast("No favourite effects yet. Long-press effects on the Effects tab to add them."); return; }
   stopPlaylist();
   const next=()=>pool[Math.floor(Math.random()*pool.length)]();
-  playlist={timer:setInterval(next, every*1000)}; next();
+  playlist={timer:ticker.every(next, every*1000)}; bgStart("Shuffle"); next();
   $("#plBtn").textContent="Stop shuffle";
   toast(`Shuffling every ${every} s`);
 }
@@ -1196,13 +1286,15 @@ async function startMusic(){
       else { const now=performance.now(); if(b > avg*(1.35-sens*.3) && b>.15 && now-lastBeat>140){ lastBeat=now; flashC=hsv(Math.random()*360,1,1); } c = scale(flashC, Math.max(.06, 1-(now-lastBeat)/380)); }
       S.view.c=c; link.send("stream", P.color(...c));
     };
-    mus = {stream, ac, timer:setInterval(tick,50)};
+    mus = {stream, ac, timer:ticker.every(tick,50)};
+    bgStart("Music · " + musMode);
     $("#musBtn").textContent="Stop listening";
     if(!link.ok) toast("Listening. Connect the strip to send it the beat.");
   }catch(e){ toast("Microphone blocked. Allow it in the browser's site settings."); }
 }
 function stopMusic(silent){
-  if(!mus) return; clearInterval(mus.timer); mus.stream.getTracks().forEach(t=>t.stop()); mus.ac.close(); mus=null;
+  if(mus && !studioTimer) bgStop();
+  if(!mus) return; mus.timer.clear(); mus.stream.getTracks().forEach(t=>t.stop()); mus.ac.close(); mus=null;
   $("#musBtn").textContent="Start listening"; $("#musMeter").style.width="0";
   if(!silent) applyColour(S.color);
 }
@@ -1214,6 +1306,13 @@ $("#devSens").oninput=e=>{ $("#devSensOut").textContent=e.target.value+"%"; link
 /* ---------- settings ---------- */
 $("#pixN").value=S.pix;
 $("#pixN").onchange=e=>{ S.pix=clamp(+e.target.value||60,10,1000); e.target.value=S.pix; store.set("pix",S.pix); buildPath(); renderSegs(); };
+[["bgRun",true],["keepAwake",false]].forEach(([k,d])=>{
+  const el=$("#"+k); el.setAttribute("aria-checked", store.get(k,d));
+  el.onclick=()=>{ const on=el.getAttribute("aria-checked")!=="true"; el.setAttribute("aria-checked",on); store.set(k,on);
+    if(!on){ if(k==="bgRun" && bg.audio) bg.audio.pause(); if(k==="keepAwake" && bg.lock){ bg.lock.release().catch(()=>{}); bg.lock=null; } }
+    else if(studioTimer || mus) bgStart(bg.label || "Glowstrip");
+    toast(k==="bgRun" ? (on?"Background running on":"Background running off") : (on?"Screen stays on during effects":"Screen can turn off")); };
+});
 $("#offTimer").onchange=e=>{ const s=+e.target.value; link.send("timer",P.offIn(s)); toast(s? `Strip will turn off in ${e.target.selectedOptions[0].text}` : "Auto-off cancelled"); };
 $("#rawSend").onclick=()=>{ const h=$("#rawHex").value.replace(/[^0-9a-f]/gi,""); if(h.length<2||h.length%2){ toast("Enter an even number of hex digits"); return; }
   const u8=new Uint8Array(h.match(/../g).map(x=>parseInt(x,16))); link.send("raw"+Date.now(), u8); };
