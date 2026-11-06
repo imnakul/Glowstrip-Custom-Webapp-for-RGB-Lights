@@ -26,6 +26,7 @@ Command IDs from the community reverse engineering at https://github.com/l0lsec/
 ## Versions
 The current version shows under the app name and in Settings → About. With every change, bump `VERSION`, `RELEASED` and `NOTES` at the top of the script in `index.html`, and `CACHE` in `sw.js`.
 
+- **1.4.0** (6 Nov 2026): animated splash with the wave logo; power button off until connected (tap to connect); sliding tab indicator, panel transitions, press feedback, colour fades, light haptics
 - **1.3.0** (6 Nov 2026): installable PWA (manifest, icons, offline service worker, Install button)
 - **1.2.0** (6 Nov 2026): version display; 42 studio effects, colour combo builder, shuffle; Segments marked preview-only
 

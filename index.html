@@ -14,7 +14,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet">
 <style>
+@property --glow{syntax:"<color>";inherits:true;initial-value:#ff3b6b}
 :root{
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --spring:cubic-bezier(.34,1.45,.5,1);
   --room:#1b1630;      /* the dark room */
   --wall:#251f40;      /* raised surfaces */
   --wall-2:#2f2852;
@@ -30,6 +33,7 @@
   --body:"Atkinson Hyperlegible",system-ui,sans-serif;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{transition:--glow .6s ease}
 html,body{margin:0;background:var(--room);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.45}
 body{min-height:100dvh;padding-bottom:calc(84px + env(safe-area-inset-bottom))}
 button,input,select{font:inherit;color:inherit}
@@ -123,6 +127,37 @@ p.hint{color:var(--ink-2);font-size:.92rem;margin:4px 0 12px;max-width:62ch}
 .combo-c input::-webkit-color-swatch{border:2px solid var(--seam);border-radius:50%}
 .combo-c button{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:1px solid var(--seam);background:var(--room);color:var(--ink-2);font-size:.9rem;line-height:1;padding:0}
 .combo-add{width:52px;height:52px;border-radius:50%;border:2px dashed var(--seam);background:transparent;color:var(--ink-2);font-size:1.5rem}
+/* motion */
+.btn,.chip,.tile,.sw,.power,.conn,.iconbtn,.combo-add,.switch{transition:transform .2s var(--ease),background-color .25s,border-color .25s,box-shadow .35s,color .2s,opacity .2s}
+.btn:active,.chip:active,.power:active,.conn:active,.iconbtn:active,.combo-add:active{transform:scale(.95)}
+.tile:active{transform:scale(.97)}
+.sw:active{transform:scale(.88)}
+.sw[aria-pressed="true"]{transform:scale(1.06)}
+.switch::after{transition:transform .3s var(--spring),background-color .2s}
+input[type=range]::-webkit-slider-thumb{transition:transform .18s var(--ease)}
+input[type=range]:active::-webkit-slider-thumb{transform:scale(1.2)}
+.power[aria-pressed="false"] svg{opacity:.6}
+.conn .dot{transition:background-color .3s,box-shadow .3s}
+.conn.pulse .dot{animation:ring .9s var(--ease)}
+@keyframes ring{0%{box-shadow:0 0 0 0 rgba(94,230,168,.8)}100%{box-shadow:0 0 0 12px rgba(94,230,168,0)}}
+.nav-ind{position:absolute;top:0;left:0;width:56px;height:32px;border-radius:16px;background:color-mix(in srgb,var(--glow) 18%,transparent);transition:transform .45s var(--spring),opacity .25s;pointer-events:none;z-index:0}
+nav.tabs button{position:relative;z-index:1}
+nav.tabs svg{transition:color .25s,filter .25s}
+nav.tabs button{transition:color .25s}
+
+/* splash */
+#splash{position:fixed;inset:0;z-index:50;background:var(--room);display:grid;place-items:center;transition:opacity .5s ease,visibility .5s}
+#splash.out{opacity:0;visibility:hidden}
+#splash .mark{display:flex;flex-direction:column;align-items:center;gap:22px;transition:transform .5s var(--ease)}
+#splash.out .mark{transform:scale(1.04)}
+#splash svg{width:min(60vw,250px);height:auto;overflow:visible}
+#splash .d{opacity:.1;animation:lit .5s var(--ease) calc(var(--i)*38ms) forwards,bob 1.8s ease-in-out calc(var(--i)*60ms + .6s) infinite}
+@keyframes lit{to{opacity:1}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+#splash .word{font-family:var(--display);font-weight:800;font-size:1.7rem;letter-spacing:-.02em;opacity:0;transform:translateY(8px);animation:rise .6s var(--ease) .6s forwards}
+#splash .word span{display:block;text-align:center;font-family:var(--body);font-weight:400;font-size:.75rem;letter-spacing:0;color:var(--ink-3);margin-top:4px}
+@keyframes rise{to{opacity:1;transform:none}}
+
 /* settings */
 .field{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--seam)}
 .field:last-child{border-bottom:0}
@@ -142,7 +177,7 @@ nav.tabs svg{width:24px;height:24px}
 nav.tabs button[aria-selected="true"]{color:var(--ink)}
 nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0 0 6px var(--glow))}
 
-.toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translate(-50%,20px);background:var(--ink);color:var(--room);padding:10px 16px;border-radius:12px;font-weight:700;font-size:.92rem;opacity:0;pointer-events:none;transition:.25s;z-index:9;max-width:90vw;text-align:center}
+.toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translate(-50%,16px) scale(.96);background:var(--ink);color:var(--room);padding:10px 16px;border-radius:12px;font-weight:700;font-size:.92rem;opacity:0;pointer-events:none;transition:opacity .25s ease,transform .4s var(--spring);z-index:9;max-width:90vw;text-align:center}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
 @media (min-width:720px){
@@ -150,10 +185,31 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
   nav.tabs{max-width:560px;margin:0 auto}
   .grid{grid-template-columns:1fr 1fr 1fr}
 }
-@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}#splash .d,#splash .word{opacity:1;transform:none}}
 </style>
 </head>
 <body>
+<div id="splash" aria-hidden="true">
+  <div class="mark">
+    <svg id="splashSvg" viewBox="0 0 250 130">
+      <defs><filter id="sblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="7"/></filter></defs>
+      <g id="sGlow" filter="url(#sblur)" opacity=".75"></g><g id="sCore"></g>
+    </svg>
+    <div class="word">Glowstrip<span id="splashVer"></span></div>
+  </div>
+</div>
+<script>
+(function(){
+  var stops=[[255,59,107],[255,122,26],[255,210,26],[25,230,160],[26,224,255],[122,42,255]];
+  function col(t){var f=t*(stops.length-1),i=Math.min(Math.floor(f),stops.length-2),k=f-i;return stops[i].map(function(v,j){return Math.round(v+(stops[i+1][j]-v)*k)});}
+  var n=22,g="",c="";
+  for(var i=0;i<n;i++){var t=i/(n-1),x=12+t*226,y=65-Math.sin(t*Math.PI*2)*36,k=col(t),
+    rgb="rgb("+k.join(",")+")",lt="rgb("+k.map(function(v){return Math.round(v+(255-v)*.35)}).join(",")+")";
+    g+='<circle class="d" style="--i:'+i+'" cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="13" fill="'+rgb+'"/>';
+    c+='<circle class="d" style="--i:'+i+'" cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="5.2" fill="'+lt+'"/>';}
+  document.getElementById("sGlow").innerHTML=g; document.getElementById("sCore").innerHTML=c;
+})();
+</script>
 
 <header class="top">
   <h1 class="brand">Glowstrip <span class="ver" id="verBadge"></span></h1>
@@ -328,9 +384,12 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 (() => {
 "use strict";
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Animated splash screen with the glowing wave logo",
+  "Power button shows off until the strip is connected; tapping it connects",
+  "Smoother feel: sliding tab indicator, panel transitions, press feedback, colour fades, light haptics",
   "Installable app (PWA): own icon, opens full screen, works offline",
   "Version number shown in the header and here",
   "42 studio effects in 5 groups, colour combo builder, shuffle",
@@ -338,6 +397,9 @@ const NOTES = [
 ];
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const haptic = (p=6) => { try{ if(!reduced && navigator.vibrate) navigator.vibrate(p); }catch{} };
+document.addEventListener("click", e => { if(e.target.closest(".tile,.sw,nav.tabs button,.power,.chip,.btn.main,.combo-add")) haptic(5); }, true);
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
 
 /* ---------- storage (best effort) ---------- */
@@ -399,7 +461,7 @@ async function connect(){
       optionalServices:[0xfff0]
     });
     link.dev = dev;
-    dev.addEventListener("gattserverdisconnected", () => { link.ch=null; setConn("off","Reconnect"); toast("Strip disconnected"); });
+    dev.addEventListener("gattserverdisconnected", () => { link.ch=null; setConn("off","Reconnect"); renderPower(); toast("Strip disconnected"); });
     setConn("busy","Connecting…");
     const gatt = await dev.gatt.connect();
     const svc  = await gatt.getPrimaryService(0xfff0);
@@ -410,6 +472,8 @@ async function connect(){
       rx.addEventListener("characteristicvaluechanged", e => logLine("← " + hex(new Uint8Array(e.target.value.buffer))));
     }catch{}
     setConn("on", dev.name || "Connected");
+    S.on = true; renderPower(); haptic([10,40,14]);
+    const cb=$("#connBtn"); cb.classList.remove("pulse"); void cb.offsetWidth; cb.classList.add("pulse");
     toast("Connected to " + (dev.name||"strip"));
     link.pump();
   }catch(e){
@@ -525,7 +589,7 @@ function patternFor(name){
   return (i,n,t)=> hsv(i/n*360*1.2 - back*t*90, 1, 1);
 }
 
-let t0 = performance.now(), tAcc = 0;
+let t0 = performance.now(), tAcc = 0, kDisp = null, disp = [];
 function frame(now){
   const dt = Math.min(.1,(now - t0)/1000); t0 = now; tAcc += dt * (0.04 + S.spd/100*2); const t = tAcc;
   const n = pts.length;
@@ -536,20 +600,26 @@ function frame(now){
   cx.strokeStyle="#3a3260"; cx.lineWidth=20; cx.beginPath();
   pts.forEach(([x,y],i)=> i?cx.lineTo(x,y):cx.moveTo(x,y)); cx.stroke();
 
-  const k = S.on ? (0.25 + 0.75*S.bri/100) : 0;
+  const kT = S.on ? (0.25 + 0.75*S.bri/100) : 0;
+  kDisp = kDisp==null || reduced ? kT : kDisp + (kT-kDisp)*Math.min(1, dt*9);
+  const k = kDisp;
   const col = i => {
     const v = S.view;
-    if(!S.on) return [0,0,0];
     if(v.kind==="solid") return S.color;
     if(v.kind==="segments") return segColourAt(i/n);
     if(v.kind==="mode") return v.fn(i,n,t);
     if(v.kind==="stream") return v.c;
     return S.color;
   };
+  const smooth = !reduced && (S.view.kind==="solid" || S.view.kind==="segments"), a = Math.min(1, dt*11);
+  for(let i=0;i<n;i++){
+    const tg = col(i);
+    disp[i] = smooth && disp[i] ? disp[i].map((v,j)=>v+(tg[j]-v)*a) : tg;
+  }
   // glow pass then core pass
   for(let pass=0; pass<2; pass++){
     for(let i=0;i<n;i++){
-      const c = scale(col(i), k); if(c[0]+c[1]+c[2] < 8) continue;
+      const c = scale(disp[i], k); if(c[0]+c[1]+c[2] < 8) continue;
       const [x,y] = pts[i];
       if(pass===0){
         cx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},.18)`;
@@ -571,11 +641,17 @@ function show(kind, label, extra={}){
 }
 
 /* ---------- power / brightness / speed ---------- */
+function renderPower(){
+  const on = link.ok && S.on, b = $("#powerBtn");
+  b.setAttribute("aria-pressed", on);
+  b.setAttribute("aria-label", !link.ok ? "Connect the strip" : on ? "Turn strip off" : "Turn strip on");
+}
 $("#powerBtn").onclick = () => {
-  S.on = !S.on; $("#powerBtn").setAttribute("aria-pressed", S.on);
+  if(!link.ok){ toast("Connect the strip first"); connect(); return; }
+  S.on = !S.on; renderPower();
   link.send("power", P.power(S.on)); toast(S.on ? "Strip on" : "Strip off");
 };
-$("#powerBtn").setAttribute("aria-pressed","true");
+renderPower();
 function bindDial(id, out, key, cmd){
   const el=$(id), o=$(out); el.value=S[key]; o.textContent=S[key]+"%";
   el.oninput = () => { S[key]=+el.value; o.textContent=el.value+"%"; store.set(key,S[key]); link.send(key, cmd(S[key])); };
@@ -589,7 +665,7 @@ function renderSwatches(el, list, removable){
   el.innerHTML = "";
   list.forEach(h => {
     const b = document.createElement("button");
-    b.className="sw"; b.style.setProperty("--c",h); b.setAttribute("aria-label", (removable?"Saved ":"")+"colour "+h);
+    b.className="sw"; b.dataset.hex=h.toLowerCase(); b.style.setProperty("--c",h); b.setAttribute("aria-label", (removable?"Saved ":"")+"colour "+h);
     b.setAttribute("aria-pressed", toHex(S.color)===h.toLowerCase());
     b.onclick = () => applyColour(fromHex(h));
     if(removable) b.oncontextmenu = e => { e.preventDefault(); favs = favs.filter(x=>x!==h); store.set("favs",favs); renderFavs(); toast("Removed"); };
@@ -606,7 +682,7 @@ function applyColour(c, fromSlider){
   $("#hexIn").value = toHex(c); $("#pick").value = toHex(c);
   if(!fromSlider){ const [h,s]=rgb2hsv(c); $("#hue").value=Math.round(h); $("#sat").value=Math.round(s*100); }
   $("#sat").style.setProperty("--pure", toHex(hsv(+$("#hue").value,1,1)));
-  renderSwatches($("#swatches"), BASE); renderFavs();
+  const cur = toHex(c); $$(".sw").forEach(x=>x.setAttribute("aria-pressed", x.dataset.hex===cur));
 }
 $("#hue").oninput = $("#sat").oninput = () => applyColour(hsv(+$("#hue").value, $("#sat").value/100, 1), true);
 $("#pick").oninput = e => applyColour(fromHex(e.target.value));
@@ -648,7 +724,7 @@ function renderFx(){
   if(!ids.length){ g.innerHTML = `<p class="hint">${fxCat==="Favourites" ? "Long-press any effect to add it here." : "No effect matches that search."}</p>`; return; }
   ids.forEach(id=>{
     const name=MODE_NAMES[id], b=document.createElement("button");
-    b.className="tile"; b.style.setProperty("--bar", barFor(name));
+    b.className="tile"; b.dataset.id=id; b.style.setProperty("--bar", barFor(name));
     b.setAttribute("aria-pressed", id===curMode);
     b.innerHTML = `<span class="bar"></span><span class="nm">${name}</span><span class="id">#${id}${fxFavs.includes(id)?" · saved":""}</span>`;
     b.onclick = () => playMode(id);
@@ -662,7 +738,7 @@ function playMode(id, fromPlaylist){
   link.send("mode", P.mode(id));
   show("mode", MODE_NAMES[id], {fn: patternFor(MODE_NAMES[id])});
   const c = coloursFromName(MODE_NAMES[id]).find(Array.isArray); if(c) setAccent(c);
-  renderFx();
+  $$("#fxGrid .tile").forEach(x=>x.setAttribute("aria-pressed", +x.dataset.id===id));
 }
 $("#fxSearch").oninput = () => { renderCats(); renderFx(); };
 
@@ -755,7 +831,7 @@ function renderStudio(){
   const a=HX($("#stA").value), bb=HX($("#stB").value);
   Object.entries(STUDIO).filter(([,e])=>studioGroup==="All"||e.g===studioGroup).forEach(([n,e])=>{
     const b=document.createElement("button"); b.className="tile";
-    b.setAttribute("aria-pressed", n===studioName);
+    b.dataset.n=n; b.setAttribute("aria-pressed", n===studioName);
     const sample=[0,1,2,3,4,5].map(i=>toHex(e.f(e.real? i*3+2 : i*.7+.3, a, bb)));
     b.style.setProperty("--bar",`linear-gradient(90deg,${sample.join(",")})`);
     b.innerHTML=`<span class="bar"></span><span class="nm">${n}</span><span class="id">${e.g}</span>`;
@@ -779,9 +855,10 @@ function runStream(label, fn, real){
 }
 function startStudio(n, fromPlaylist){
   if(!fromPlaylist) stopPlaylist();
-  const e=STUDIO[n]; runStream(n, e.f, e.real); studioName=n; renderStudio();
+  const e=STUDIO[n]; runStream(n, e.f, e.real); studioName=n; markStudio();
 }
-function stopStudio(){ if(studioTimer){ clearInterval(studioTimer); studioTimer=null; const had=studioName; studioName=null; if(had) renderStudio(); } }
+function markStudio(){ $$("#studioGrid .tile").forEach(x=>x.setAttribute("aria-pressed", x.dataset.n===studioName)); }
+function stopStudio(){ if(studioTimer){ clearInterval(studioTimer); studioTimer=null; const had=studioName; studioName=null; if(had) markStudio(); } }
 $("#stopStudio").onclick=()=>{ stopPlaylist(); stopStudio(); applyColour(S.color); };
 $("#stA").oninput=$("#stB").oninput=renderStudio;
 
@@ -973,13 +1050,43 @@ $("#rawSend").onclick=()=>{ const h=$("#rawHex").value.replace(/[^0-9a-f]/gi,"")
 /* ---------- tabs ---------- */
 const TAB_ORDER = ["colour","effects","segments","studio","music"];
 $$("nav.tabs button").forEach(b=>b.onclick=()=>openTab(b.dataset.p));
-function openTab(p){
-  $$("nav.tabs button").forEach(x=>x.setAttribute("aria-selected", x.dataset.p===p));
-  $$(".panel").forEach(x=>x.classList.toggle("on", x.id==="p-"+p));
-  if(p==="segments") showSegs();
-  window.scrollTo({top:0,behavior:"smooth"});
+let curTab = "colour";
+const navInd = document.createElement("span"); navInd.className = "nav-ind"; $("nav.tabs").prepend(navInd);
+function moveInd(instant){
+  const b = $(`nav.tabs button[data-p="${curTab}"]`);
+  if(!b){ navInd.style.opacity = 0; return; }
+  const nav = $("nav.tabs").getBoundingClientRect(), r = b.querySelector("svg").getBoundingClientRect();
+  if(instant) navInd.style.transition = "none";
+  navInd.style.opacity = 1;
+  navInd.style.transform = `translate(${r.left-nav.left + r.width/2 - 28}px, ${r.top-nav.top + r.height/2 - 16}px)`;
+  if(instant){ void navInd.offsetWidth; navInd.style.transition = ""; }
 }
-$("#setBtn").onclick=()=>{ $$(".panel").forEach(x=>x.classList.toggle("on", x.id==="p-settings")); $$("nav.tabs button").forEach(x=>x.setAttribute("aria-selected",false)); window.scrollTo({top:0,behavior:"smooth"}); };
+window.addEventListener("resize", () => moveInd(true));
+function swapPanel(id, dir){
+  const next = $("#"+id), prev = $(".panel.on");
+  if(prev === next) return;
+  $$(".panel").forEach(x=>x.classList.toggle("on", x===next));
+  if(reduced) return;
+  next.animate(
+    [{opacity:0, transform: dir ? `translateX(${dir*18}px)` : "translateY(10px)"}, {opacity:1, transform:"none"}],
+    {duration:300, easing:"cubic-bezier(.2,.8,.2,1)"});
+}
+function openTab(p){
+  const dir = curTab==="settings" ? 0 : Math.sign(TAB_ORDER.indexOf(p) - TAB_ORDER.indexOf(curTab));
+  if(p===curTab){ window.scrollTo({top:0,behavior:"smooth"}); return; }
+  curTab = p;
+  $$("nav.tabs button").forEach(x=>x.setAttribute("aria-selected", x.dataset.p===p));
+  swapPanel("p-"+p, dir); moveInd();
+  if(p==="segments") showSegs();
+  window.scrollTo({top:0,behavior: reduced ? "auto" : "smooth"});
+}
+$("#setBtn").onclick=()=>{
+  if(curTab==="settings"){ openTab("colour"); return; }
+  curTab = "settings";
+  $$("nav.tabs button").forEach(x=>x.setAttribute("aria-selected",false));
+  swapPanel("p-settings", 0); moveInd();
+  window.scrollTo({top:0,behavior: reduced ? "auto" : "smooth"});
+};
 
 /* ---------- boot ---------- */
 document.getElementById("verBadge").textContent = "v" + VERSION;
@@ -1009,9 +1116,17 @@ installBtn.onclick = async () => {
 };
 window.addEventListener("appinstalled", () => { installBtn.hidden = true; installHint.textContent = "Installed. Open Glowstrip from your app drawer."; });
 layout();
+renderSwatches($("#swatches"), BASE); renderFavs();
 renderCats(); renderFx(); renderScenes(); renderStudioGroups(); renderStudio(); renderCombo(); renderSegs(); renderMusModes();
 applyColour(S.color);
 requestAnimationFrame(frame);
+moveInd(true);
+document.getElementById("splashVer").textContent = "v" + VERSION;
+(function(){
+  const sp = document.getElementById("splash");
+  const wait = reduced ? 250 : Math.max(0, 1600 - performance.now());
+  setTimeout(() => { sp.classList.add("out"); setTimeout(() => sp.remove(), 600); }, wait);
+})();
 if(!navigator.bluetooth) setConn("off","No Bluetooth");
 })();
 </script>
