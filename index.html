@@ -153,6 +153,16 @@ nav.tabs button{transition:color .25s}
 .tile[data-state="pending"] .nm{opacity:.7}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* connection sheet */
+.sheet-wrap{position:fixed;inset:0;z-index:20;background:rgba(10,8,22,.55);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility .25s}
+.sheet-wrap.open{opacity:1;visibility:visible}
+.sheet{position:absolute;left:0;right:0;bottom:0;max-width:560px;margin:0 auto;background:var(--wall);border:1px solid var(--seam);border-bottom:0;border-radius:24px 24px 0 0;padding:10px 18px calc(18px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .38s var(--spring)}
+.sheet-wrap.open .sheet{transform:none}
+.grab{display:block;width:40px;height:4px;border-radius:4px;background:var(--seam);margin:0 auto 12px}
+.sheet-btns{display:grid;gap:10px}
+.sheet-btns .btn{width:100%;padding:14px 16px}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+
 /* splash */
 #splash{position:fixed;inset:0;z-index:50;background:var(--room);display:grid;place-items:center;transition:opacity .5s ease,visibility .5s}
 #splash.out{opacity:0;visibility:hidden}
@@ -388,15 +398,31 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
   <button role="tab" aria-selected="false" data-p="music"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Music</button>
 </nav>
 
+<div class="sheet-wrap" id="connSheet" aria-hidden="true">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle">
+    <span class="grab" aria-hidden="true"></span>
+    <h2 id="shTitle" style="margin:4px 0 2px">Not connected</h2>
+    <p class="hint" id="shSub" style="margin:0 0 16px"></p>
+    <div class="sheet-btns">
+      <button class="btn main" id="shRe">Reconnect</button>
+      <button class="btn" id="shDisc">Disconnect</button>
+      <button class="btn" id="shNew">Connect a different strip</button>
+      <button class="btn ghost" id="shClose">Close</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status"></div>
 
 <script>
 (() => {
 "use strict";
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.5.0";
+const VERSION = "1.6.0";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Tap the connection pill for Disconnect, Reconnect and Connect a different strip",
+  "Reconnect goes straight to your last strip, no picker",
+  "If the strip drops by itself, the app retries quietly up to 3 times",
   "Effects show a spinner until they actually reach the strip, then turn active; quick taps only activate the last one",
   "Less Bluetooth lag: repeated identical frames are skipped and sending slows down for slow controllers",
   "Lab shows the average Bluetooth write time",
@@ -487,7 +513,11 @@ const link = {
   }
 };
 
-async function connect(){
+// --- connection -------------------------------------------------------------
+let userDisconnect = false, retryTimer = null;
+const DEV_KEY = "lastDevice";
+
+async function connect(){          // choose a strip from Chrome's picker
   if(!navigator.bluetooth){
     toast("This browser can't use Bluetooth. Open the page in Chrome on Android.");
     return;
@@ -498,27 +528,87 @@ async function connect(){
       filters:[{namePrefix:"MELK"},{namePrefix:"ELK"},{services:[0xfff0]}],
       optionalServices:[0xfff0]
     });
-    link.dev = dev;
-    dev.addEventListener("gattserverdisconnected", () => { link.ch=null; setConn("off","Reconnect"); renderPower(); toast("Strip disconnected"); });
-    setConn("busy","Connecting…");
-    const gatt = await dev.gatt.connect();
-    const svc  = await gatt.getPrimaryService(0xfff0);
-    link.ch = await svc.getCharacteristic(0xfff3);
-    try{
-      const rx = await svc.getCharacteristic(0xfff4);
-      await rx.startNotifications();
-      rx.addEventListener("characteristicvaluechanged", e => logLine("← " + hex(new Uint8Array(e.target.value.buffer))));
-    }catch{}
-    setConn("on", dev.name || "Connected");
-    S.on = true; renderPower(); haptic([10,40,14]);
-    const cb=$("#connBtn"); cb.classList.remove("pulse"); void cb.offsetWidth; cb.classList.add("pulse");
-    toast("Connected to " + (dev.name||"strip"));
-    link.pump();
+    await attach(dev);
   }catch(e){
     setConn("off", link.ok ? (link.dev.name||"Connected") : "Connect strip");
     if(e.name!=="NotFoundError") toast("Couldn't connect: " + e.message + ". Close the Lotus app and try again.");
   }
 }
+
+async function attach(dev, quiet){  // open GATT on a known device
+  if(link.dev && link.dev !== dev && link.dev.gatt?.connected){ userDisconnect = true; link.dev.gatt.disconnect(); }
+  if(link.dev !== dev){
+    dev.addEventListener("gattserverdisconnected", () => onDropped(dev));
+  }
+  link.dev = dev;
+  setConn("busy","Connecting…");
+  const gatt = await withTimeout(dev.gatt.connect(), 10000, "The strip didn't answer");
+  const svc  = await gatt.getPrimaryService(0xfff0);
+  link.ch = await svc.getCharacteristic(0xfff3);
+  try{
+    const rx = await svc.getCharacteristic(0xfff4);
+    await rx.startNotifications();
+    rx.addEventListener("characteristicvaluechanged", e => logLine("← " + hex(new Uint8Array(e.target.value.buffer))));
+  }catch{}
+  userDisconnect = false; clearTimeout(retryTimer);
+  store.set(DEV_KEY, {id: dev.id, name: dev.name});
+  setConn("on", dev.name || "Connected");
+  S.on = true; renderPower(); haptic([10,40,14]);
+  const cb=$("#connBtn"); cb.classList.remove("pulse"); void cb.offsetWidth; cb.classList.add("pulse");
+  if(!quiet) toast("Connected to " + (dev.name||"strip"));
+  renderSheet();
+  link.pump();
+}
+const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)), ms))]);
+
+function onDropped(dev){
+  if(link.dev !== dev) return;
+  link.ch = null; renderPower(); renderSheet();
+  if(userDisconnect){ setConn("off","Reconnect"); toast("Disconnected"); return; }
+  // dropped by itself (out of range, strip switched off): try a few times quietly
+  setConn("busy","Reconnecting…");
+  let tries = 0;
+  const again = async () => {
+    tries++;
+    try{ await attach(dev, true); toast("Reconnected"); }
+    catch{ if(tries < 3) retryTimer = setTimeout(again, 1500*tries); else { setConn("off","Reconnect"); toast("Lost the strip. Tap Reconnect when it's back on."); } }
+  };
+  retryTimer = setTimeout(again, 600);
+}
+
+function disconnect(){
+  clearTimeout(retryTimer);
+  if(link.dev?.gatt?.connected){ userDisconnect = true; link.dev.gatt.disconnect(); }
+  else { link.ch = null; setConn("off","Reconnect"); renderPower(); renderSheet(); }
+}
+
+async function reconnect(){         // reconnect to the last strip without the picker
+  clearTimeout(retryTimer);
+  let dev = link.dev;
+  if(!dev && navigator.bluetooth?.getDevices){
+    try{ const saved = store.get(DEV_KEY,null); dev = (await navigator.bluetooth.getDevices()).find(d => saved && d.id===saved.id); }catch{}
+  }
+  if(!dev){ return connect(); }
+  try{ await attach(dev); }
+  catch(e){ setConn("off","Reconnect"); toast("Couldn't reach " + (dev.name||"the strip") + ". Is it switched on and the Lotus app closed?"); }
+}
+
+/* ---- connection sheet ---- */
+function renderSheet(){
+  const sh = $("#connSheet"); if(!sh) return;
+  const saved = store.get(DEV_KEY, null);
+  const name = link.dev?.name || saved?.name;
+  $("#shTitle").textContent = link.ok ? (link.dev.name || "Strip") : "Not connected";
+  $("#shSub").textContent = link.ok ? "Connected" + (link.n ? ` · average write ${Math.round(link.avg)} ms` : "")
+                          : name ? "Last used: " + name : "No strip connected yet";
+  $("#shDisc").hidden = !link.ok;
+  $("#shRe").hidden = link.ok || !name;
+  $("#shRe").textContent = "Reconnect to " + (name || "strip");
+  $("#shNew").textContent = link.ok || name ? "Connect a different strip" : "Connect strip";
+  $("#shNew").classList.toggle("main", !link.ok && !name);
+}
+function openSheet(){ renderSheet(); $("#connSheet").classList.add("open"); $("#connSheet").setAttribute("aria-hidden","false"); }
+function closeSheet(){ $("#connSheet").classList.remove("open"); $("#connSheet").setAttribute("aria-hidden","true"); }
 let selTok = 0;
 // Show a spinner on the chosen tile until its first frame reaches the strip; only
 // then mark it active. A newer tap cancels an older pending one.
@@ -534,8 +624,18 @@ function pendingSelect(gridSel, match, sendPromise, onDone){
   });
 }
 function setConn(state, txt){ $("#connBtn").dataset.state=state; $("#connTxt").textContent=txt; }
-$("#connBtn").onclick = () => link.ok ? toast("Already connected to " + (link.dev.name||"strip")) : connect();
-$("#disc").onclick = () => { if(link.dev?.gatt?.connected) link.dev.gatt.disconnect(); };
+$("#connBtn").onclick = () => {
+  if(!navigator.bluetooth){ toast("This browser can't use Bluetooth. Open the page in Chrome on Android."); return; }
+  if(!link.ok && !link.dev && !store.get(DEV_KEY,null)) return connect();   // first time: straight to the picker
+  openSheet();
+};
+$("#disc").onclick = disconnect;
+$("#shDisc").onclick = () => { closeSheet(); disconnect(); };
+$("#shRe").onclick = () => { closeSheet(); reconnect(); };
+$("#shNew").onclick = () => { closeSheet(); connect(); };
+$("#shClose").onclick = closeSheet;
+$("#connSheet").addEventListener("click", e => { if(e.target.id==="connSheet") closeSheet(); });
+document.addEventListener("keydown", e => { if(e.key==="Escape") closeSheet(); });
 
 /* ---------- state ---------- */
 const S = {
@@ -699,7 +799,7 @@ function renderPower(){
   b.setAttribute("aria-label", !link.ok ? "Connect the strip" : on ? "Turn strip off" : "Turn strip on");
 }
 $("#powerBtn").onclick = () => {
-  if(!link.ok){ toast("Connect the strip first"); connect(); return; }
+  if(!link.ok){ (link.dev || store.get(DEV_KEY,null)) ? reconnect() : (toast("Connect the strip first"), connect()); return; }
   S.on = !S.on; renderPower();
   link.send("power", P.power(S.on)); toast(S.on ? "Strip on" : "Strip off");
 };
