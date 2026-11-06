@@ -23,9 +23,19 @@ A phone web app for controlling MELK-OA10 (Lotus Lamp X family) Bluetooth RGB st
 Service `FFF0`, write `FFF3`, notify `FFF4`, 9-byte frames `7E len cmd … EF`.
 Command IDs from the community reverse engineering at https://github.com/l0lsec/LotusLampX.
 
+## Desktop app (Windows)
+The same app as a native Windows program, built with Tauri. Bluetooth goes through Rust ([btleplug](https://github.com/deviceplug/btleplug)) instead of the browser, so there are no browser Bluetooth quirks and nothing gets paused when the window is in the background.
+
+- **Download:** the latest `Glowstrip_x.y.z_x64-setup.exe` from this repo's Releases page.
+- **Build a new release:** bump the version in `desktop/src-tauri/tauri.conf.json`, then push a tag such as `desktop-v1.9.0`. GitHub Actions (`.github/workflows/desktop.yml`) builds the installer and publishes the release.
+- **Build locally:** `cd desktop && npm install && npx tauri build`
+
+The web UI is shared: `desktop/scripts/copy-web.mjs` copies `index.html`, the manifest and icons into the desktop build, and a small shim in `index.html` maps the Web Bluetooth calls to the native commands.
+
 ## Versions
 The current version shows under the app name and in Settings → About. With every change, bump `VERSION`, `RELEASED` and `NOTES` at the top of the script in `index.html`, and `CACHE` in `sw.js`.
 
+- **1.9.0** (6 Nov 2026): keep-alive read every 20 s of silence (fixes idle drops on PC browsers); drops logged with idle time; Windows desktop app with native Bluetooth
 - **1.8.1** (6 Nov 2026): strip-mic mode is a proper mode (stops app streams, keeps Bluetooth alive in background, restored after reconnect); Music tab lists it first
 - **1.8.0** (6 Nov 2026): auto-connect to the last strip on launch and when returning from the background (uses getDevices() and watchAdvertisements() where Chrome supports them); toggle in Settings
 - **1.7.1** (6 Nov 2026): keep-alive track lengthened past Chrome's 5 s media-notification threshold; music starts keep-alive inside the tap; background check log in Settings
@@ -43,3 +53,5 @@ The current version shows under the app name and in Settings → About. With eve
 - `manifest.webmanifest`, `icons/`: install metadata and app icons
 - `sw.js`: service worker (network first, offline fallback)
 - `vercel.json`: keeps `sw.js` uncached so updates arrive straight away
+- `desktop/`: Tauri desktop app (Rust Bluetooth in `src-tauri/src/lib.rs`)
+- `.github/workflows/desktop.yml`: builds the Windows installer

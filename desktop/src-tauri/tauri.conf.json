@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Glowstrip",
+  "version": "1.9.0",
+  "identifier": "app.glowstrip.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeDevCommand": "node scripts/copy-web.mjs",
+    "beforeBuildCommand": "node scripts/copy-web.mjs"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Glowstrip",
+        "width": 460,
+        "height": 900,
+        "minWidth": 360,
+        "minHeight": 560,
+        "backgroundColor": "#1b1630",
+        "backgroundThrottling": "disabled"
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "shortDescription": "Control your RGB light strip",
+    "windows": { "nsis": { "installMode": "currentUser" } }
+  }
+}

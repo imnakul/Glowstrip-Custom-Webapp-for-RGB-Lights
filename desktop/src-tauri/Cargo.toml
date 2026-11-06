@@ -1,0 +1,26 @@
+[package]
+name = "glowstrip"
+version = "1.9.0"
+description = "Glowstrip desktop: control MELK-OA10 Bluetooth RGB strips"
+edition = "2021"
+
+[lib]
+name = "glowstrip_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+btleplug = "0.11"
+tokio = { version = "1", features = ["time", "sync"] }
+futures = "0.3"
+uuid = "1"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

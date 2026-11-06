@@ -407,6 +407,15 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
   <button role="tab" aria-selected="false" data-p="music"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Music</button>
 </nav>
 
+<div class="sheet-wrap" id="pickSheet" aria-hidden="true">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
+    <span class="grab" aria-hidden="true"></span>
+    <h2 id="pickTitle" style="margin:4px 0 2px">Choose your strip</h2>
+    <p class="hint" id="pickHint" style="margin:0 0 16px">Searching for nearby strips…</p>
+    <div class="sheet-btns" id="pickList"></div>
+    <div class="sheet-btns" style="margin-top:10px"><button class="btn ghost" id="pickCancel">Cancel</button></div>
+  </div>
+</div>
 <div class="sheet-wrap" id="connSheet" aria-hidden="true">
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle">
     <span class="grab" aria-hidden="true"></span>
@@ -425,10 +434,61 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 <script>
 (() => {
 "use strict";
+/* ---------- desktop app: native Bluetooth bridge ----------
+   In the Glowstrip desktop app (Tauri), Bluetooth goes through Rust (btleplug)
+   instead of the browser. This shim exposes the small part of the Web Bluetooth
+   API the app uses, so everything else runs unchanged.                        */
+const IS_DESKTOP = !!(window.__TAURI__ && window.__TAURI__.core);
+if(IS_DESKTOP){
+  const { invoke } = window.__TAURI__.core, { listen } = window.__TAURI__.event;
+  let current = null; const notifyFns = [];
+  listen("ble-disconnected", () => { if(current){ current.gatt.connected = false; current._dl.forEach(f=>f()); } });
+  listen("ble-notify", e => { const dv = new DataView(new Uint8Array(e.payload).buffer); notifyFns.forEach(f=>f({target:{value:dv}})); });
+  const writeChar = {
+    writeValueWithoutResponse: u8 => invoke("ble_write", {data: Array.from(u8)}),
+    readValue: async () => new DataView(new Uint8Array(await invoke("ble_read")).buffer),
+  };
+  const notifyChar = { startNotifications: async()=>{}, addEventListener: (t,f) => { if(t==="characteristicvaluechanged") notifyFns.push(f); } };
+  const server = { getPrimaryService: async () => ({ getCharacteristic: async u => u===0xfff3 ? writeChar : notifyChar }) };
+  function makeDev(id, name){
+    const d = { id, name, _dl: [],
+      addEventListener(t,f){ if(t==="gattserverdisconnected") d._dl.push(f); },
+      gatt: { connected:false,
+        async connect(){ current = d; const n = await invoke("ble_connect", {id}); if(n) d.name = n; d.gatt.connected = true; return server; },
+        disconnect(){ invoke("ble_disconnect"); } } };
+    return d;
+  }
+  const known = new Map();
+  function pick(){
+    return new Promise((resolve, reject) => {
+      const sheet = document.getElementById("pickSheet"), list = document.getElementById("pickList"), hint = document.getElementById("pickHint");
+      list.innerHTML = ""; hint.textContent = "Searching for nearby strips…";
+      const rows = new Map(); let done = false, unlisten = null;
+      const finish = (val, err) => { if(done) return; done = true; sheet.classList.remove("open"); invoke("ble_stop_scan"); if(unlisten) unlisten(); err ? reject(err) : resolve(val); };
+      listen("ble-found", e => {
+        const {id, name, rssi} = e.payload;
+        let b = rows.get(id);
+        if(!b){ b = document.createElement("button"); b.className = "btn"; b.onclick = () => { const d = known.get(id) || makeDev(id, name); known.set(id, d); finish(d); }; rows.set(id, b); list.appendChild(b); }
+        b.textContent = name + (rssi != null ? `  ·  signal ${rssi > -60 ? "strong" : rssi > -80 ? "good" : "weak"}` : "");
+        hint.textContent = "Tap your strip to connect.";
+      }).then(u => { unlisten = u; });
+      document.getElementById("pickCancel").onclick = () => finish(null, new DOMException("Cancelled", "NotFoundError"));
+      sheet.classList.add("open");
+      invoke("ble_scan", {seconds: 20}).then(() => { if(!done && !rows.size) hint.textContent = "No strips found. Is it switched on, and the Lotus app closed on your phone?"; })
+        .catch(err => finish(null, new Error(String(err))));
+    });
+  }
+  Object.defineProperty(navigator, "bluetooth", { configurable:true, value: {
+    requestDevice: () => pick(),
+    getDevices: async () => { try{ const s = JSON.parse(localStorage.getItem("gs_lastDevice")); if(s && s.id){ const d = known.get(s.id) || makeDev(s.id, s.name); known.set(s.id, d); return [d]; } }catch{} return []; },
+  }});
+}
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.8.1";
+const VERSION = "1.9.0";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Keep-alive stops idle disconnects (seen on PC browsers every minute)",
+  "Desktop app for Windows with native Bluetooth",
   "Music tab: strip-mic mode first, and it now stops app effects so nothing overrides it",
   "Strip-mic mode keeps Bluetooth alive in the background and is restored after a reconnect",
   "Auto-connects to your last strip when the app opens or comes back from the background (can be turned off in Settings)",
@@ -485,7 +545,7 @@ const hex = u8 => [...u8].map(b=>b.toString(16).padStart(2,"0")).join(" ");
 
 /* ---------- Bluetooth link with coalescing queue ---------- */
 const link = {
-  dev:null, ch:null, busy:false, pend:new Map(), order:[], last:new Map(), avg:0, n:0,
+  dev:null, ch:null, busy:false, pend:new Map(), order:[], last:new Map(), avg:0, n:0, lastIO:0,
   get ok(){ return !!this.ch; },
   // Queue a frame. Newest frame per key wins. Resolves once that frame (or a newer
   // one with the same key) has been written to the strip, or at once when offline.
@@ -516,7 +576,7 @@ const link = {
       try{
         if(this.ch.writeValueWithoutResponse) await this.ch.writeValueWithoutResponse(it.u8);
         else await this.ch.writeValue(it.u8);
-        this.last.set(k, it.u8);
+        this.last.set(k, it.u8); this.lastIO = Date.now();
         const ms = performance.now() - t0;
         this.avg = this.n ? this.avg*0.85 + ms*0.15 : ms; this.n++;
         if(k!=="stream") logLine("→ " + hex(it.u8) + "  " + Math.round(ms) + " ms");
@@ -562,7 +622,7 @@ async function attach(dev, quiet){  // open GATT on a known device
   setConn("busy","Connecting…");
   const gatt = await withTimeout(dev.gatt.connect(), 10000, "The strip didn't answer");
   const svc  = await gatt.getPrimaryService(0xfff0);
-  link.ch = await svc.getCharacteristic(0xfff3);
+  link.ch = await svc.getCharacteristic(0xfff3); link.lastIO = Date.now();
   try{
     const rx = await svc.getCharacteristic(0xfff4);
     await rx.startNotifications();
@@ -583,6 +643,7 @@ const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_,rej)=>setTim
 
 function onDropped(dev){
   if(link.dev !== dev) return;
+  bgDiag(`connection dropped (${userDisconnect ? "by you" : "by the strip or system"}) after ${Math.round((Date.now()-link.lastIO)/1000)} s without traffic`);
   link.ch = null; renderPower(); renderSheet();
   if(userDisconnect){ setConn("off","Reconnect"); toast("Disconnected"); return; }
   // dropped by itself (out of range, strip switched off): try a few times quietly
@@ -612,6 +673,15 @@ async function reconnect(){         // reconnect to the last strip without the p
   try{ await attach(dev); }
   catch(e){ setConn("off","Reconnect"); toast("Couldn't reach " + (dev.name||"the strip") + ". Is it switched on and the Lotus app closed?"); }
 }
+
+/* ---- keep-alive ----
+   Some strips (and Windows) close a Bluetooth link that has been quiet for about
+   a minute. Every 20 s of silence, read the control channel: harmless, no change
+   to the lights, and it keeps the link open.                                   */
+setInterval(async () => {
+  if(!link.ok || link.busy || Date.now() - link.lastIO < 20000 || !link.ch.readValue) return;
+  try{ await link.ch.readValue(); link.lastIO = Date.now(); }catch(e){ bgDiag("keep-alive read failed: " + e.message); }
+}, 5000);
 
 /* ---- auto-connect ----
    Within a session the strip object is kept, so coming back from the background
@@ -1490,13 +1560,13 @@ document.getElementById("verNotes").innerHTML = NOTES.map(n=>"<li>"+n+"</li>").j
 document.title = "Glowstrip v" + VERSION;
 
 /* ---------- PWA: service worker + install ---------- */
-if ("serviceWorker" in navigator && window.isSecureContext) {
+if ("serviceWorker" in navigator && window.isSecureContext && !IS_DESKTOP) {
   navigator.serviceWorker.register("/sw.js").catch(e => logLine("Service worker: " + e.message));
 }
 const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
 let installEvt = null;
 const installBtn = document.getElementById("installBtn"), installHint = document.getElementById("installHint");
-installHint.textContent = standalone ? "Running as an installed app." : "To install, open the Chrome menu and choose Install app.";
+installHint.textContent = IS_DESKTOP ? "Running as the Glowstrip desktop app." : standalone ? "Running as an installed app." : "To install, open the Chrome menu and choose Install app.";
 window.addEventListener("beforeinstallprompt", e => {
   e.preventDefault(); installEvt = e; installBtn.hidden = false;
   installHint.textContent = "Adds Glowstrip to your app drawer with its own icon.";

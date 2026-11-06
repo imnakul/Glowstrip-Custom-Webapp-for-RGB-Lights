@@ -1,0 +1,45 @@
+name: Desktop app
+
+# Builds the Windows installer and publishes it as a GitHub Release.
+# Runs when a tag like desktop-v1.9.0 is pushed, or manually from the Actions tab.
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install Tauri CLI
+        working-directory: desktop
+        run: npm install --no-fund --no-audit
+
+      - name: Build and publish installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: desktop-v__VERSION__
+          releaseName: Glowstrip Desktop v__VERSION__
+          releaseBody: |
+            Windows installer for Glowstrip.
+            Download the `-setup.exe` file below and run it. If Windows SmartScreen warns about an unknown publisher, choose More info → Run anyway (the app isn't code-signed).
+          releaseDraft: false
+          prerelease: false
