@@ -388,9 +388,10 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 (() => {
 "use strict";
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.4.1";
+const VERSION = "1.4.2";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Fix: content no longer jumps when switching tabs; each tab remembers where you scrolled to",
   "Fix: bottom bar no longer jumps when switching tabs",
   "Splash continues straight from Android's launch screen, no dark restart",
   "Animated splash screen with the glowing wave logo",
@@ -1057,6 +1058,8 @@ $("#rawSend").onclick=()=>{ const h=$("#rawHex").value.replace(/[^0-9a-f]/gi,"")
 const TAB_ORDER = ["colour","effects","segments","studio","music"];
 $$("nav.tabs button").forEach(b=>b.onclick=()=>openTab(b.dataset.p));
 let curTab = "colour";
+const scrollMem = {};   // each tab keeps its own scroll position, like a native app
+const jumpTo = y => window.scrollTo({top:y, behavior:"instant"});
 const navInd = document.createElement("span"); navInd.className = "nav-ind"; $("nav.tabs").prepend(navInd);
 function moveInd(instant){
   const b = $(`nav.tabs button[data-p="${curTab}"]`);
@@ -1079,19 +1082,21 @@ function swapPanel(id, dir){
 }
 function openTab(p){
   const dir = curTab==="settings" ? 0 : Math.sign(TAB_ORDER.indexOf(p) - TAB_ORDER.indexOf(curTab));
-  if(p===curTab){ window.scrollTo({top:0,behavior:"smooth"}); return; }
+  if(p===curTab){ window.scrollTo({top:0,behavior: reduced ? "instant" : "smooth"}); return; }
+  scrollMem[curTab] = window.scrollY;
   curTab = p;
   $$("nav.tabs button").forEach(x=>x.setAttribute("aria-selected", x.dataset.p===p));
   swapPanel("p-"+p, dir); moveInd();
+  jumpTo(scrollMem[p] || 0);
   if(p==="segments") showSegs();
-  window.scrollTo({top:0,behavior: reduced ? "auto" : "smooth"});
 }
 $("#setBtn").onclick=()=>{
   if(curTab==="settings"){ openTab("colour"); return; }
+  scrollMem[curTab] = window.scrollY;
   curTab = "settings";
   $$("nav.tabs button").forEach(x=>x.setAttribute("aria-selected",false));
   swapPanel("p-settings", 0); moveInd();
-  window.scrollTo({top:0,behavior: reduced ? "auto" : "smooth"});
+  jumpTo(scrollMem.settings || 0);
 };
 
 /* ---------- boot ---------- */

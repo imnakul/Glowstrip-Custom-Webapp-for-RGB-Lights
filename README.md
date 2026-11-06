@@ -26,6 +26,7 @@ Command IDs from the community reverse engineering at https://github.com/l0lsec/
 ## Versions
 The current version shows under the app name and in Settings → About. With every change, bump `VERSION`, `RELEASED` and `NOTES` at the top of the script in `index.html`, and `CACHE` in `sw.js`.
 
+- **1.4.2** (6 Nov 2026): fix content jumping on tab switch; each tab remembers its scroll position
 - **1.4.1** (6 Nov 2026): fix bottom bar jumping on tab switch (horizontal overflow made Chrome rescale the page); splash now continues from Android's launch icon; non-blocking fonts; service worker falls back to cache after 1.2 s on slow networks
 - **1.4.0** (6 Nov 2026): animated splash with the wave logo; power button off until connected (tap to connect); sliding tab indicator, panel transitions, press feedback, colour fades, light haptics
 - **1.3.0** (6 Nov 2026): installable PWA (manifest, icons, offline service worker, Install button)
