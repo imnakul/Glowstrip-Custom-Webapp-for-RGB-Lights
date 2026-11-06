@@ -1,6 +1,6 @@
 // Glowstrip service worker: network first so new deploys show up immediately,
 // cached copy when offline.
-const CACHE = "glowstrip-v1.4.0";
+const CACHE = "glowstrip-v1.4.1";
 const CORE = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -28,11 +28,16 @@ self.addEventListener("fetch", e => {
     })));
     return;
   }
-  // app files: network first, fall back to cache
+  // app files: network first, but if the network is slow (>1.2 s) use the cached
+  // copy so the launch screen doesn't hang; the fresh copy still lands in the cache.
+  const net = fetch(req).then(res => {
+    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+    return res;
+  });
+  const cached = () => caches.match(req).then(hit => hit || (req.mode === "navigate" ? caches.match("/index.html") : undefined));
+  const slow = new Promise(r => setTimeout(r, 1200)).then(cached);
   e.respondWith(
-    fetch(req).then(res => {
-      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
-      return res;
-    }).catch(() => caches.match(req).then(hit => hit || caches.match("/index.html")))
+    Promise.race([net, slow.then(hit => hit || net)]).catch(() => cached())
   );
+  e.waitUntil(net.catch(() => {}));
 });
