@@ -351,8 +351,15 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
   <!-- MUSIC -->
   <section class="panel" id="p-music" role="tabpanel">
     <h2>Music</h2>
+    <h3>Music around you</h3>
+    <p class="hint">The strip's own microphone listens to the room and reacts by itself. Best when music plays from speakers, not from this phone.</p>
+    <div class="field"><span>React to music with the strip's mic<br><span class="hint">Stops app effects while it's on</span></span><button class="switch" id="devMic" role="switch" aria-checked="false" aria-label="React to music with the strip's microphone"></button></div>
+    <div class="dial" style="margin-top:10px">
+      <label for="devSens">Sensitivity <output id="devSensOut">50%</output></label>
+      <input type="range" id="devSens" min="0" max="100" value="50">
+    </div>
     <h3>Phone microphone</h3>
-    <p class="hint">Listens through your phone and drives the strip. Keep the phone near the speaker.</p>
+    <p class="hint">Listens through this phone instead and sends the beat to the strip. Keep the phone near the speaker.</p>
     <div class="chips" id="musicModes" role="group" aria-label="Music style"></div>
     <div class="dial" style="margin:6px 0">
       <label for="musSens">Sensitivity <output id="musSensOut">60%</output></label>
@@ -360,13 +367,6 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
     </div>
     <div class="meter" aria-hidden="true"><i id="musMeter"></i></div>
     <div class="btns"><button class="btn main" id="musBtn">Start listening</button></div>
-    <h3>Strip's own microphone</h3>
-    <p class="hint">Uses the mic built into the controller, if yours has one. Works with the app closed.</p>
-    <div class="field"><span>Built-in mic reacts to sound</span><button class="switch" id="devMic" role="switch" aria-checked="false" aria-label="Built-in microphone"></button></div>
-    <div class="dial" style="margin-top:10px">
-      <label for="devSens">Built-in mic sensitivity <output id="devSensOut">50%</output></label>
-      <input type="range" id="devSens" min="0" max="100" value="50">
-    </div>
   </section>
 
   <!-- SETTINGS -->
@@ -426,9 +426,11 @@ nav.tabs button[aria-selected="true"] svg{color:var(--glow);filter:drop-shadow(0
 (() => {
 "use strict";
 /* ---------- version: bump on every change ---------- */
-const VERSION = "1.8.0";
+const VERSION = "1.8.1";
 const RELEASED = "6 Nov 2026";
 const NOTES = [
+  "Music tab: strip-mic mode first, and it now stops app effects so nothing overrides it",
+  "Strip-mic mode keeps Bluetooth alive in the background and is restored after a reconnect",
   "Auto-connects to your last strip when the app opens or comes back from the background (can be turned off in Settings)",
   "Background fix: the keep-alive track is now longer than 5 s, which Chrome needs before it shows the media notification",
   "Music starts the keep-alive during your tap, before the mic prompt",
@@ -567,6 +569,8 @@ async function attach(dev, quiet){  // open GATT on a known device
     rx.addEventListener("characteristicvaluechanged", e => logLine("← " + hex(new Uint8Array(e.target.value.buffer))));
   }catch{}
   userDisconnect = false; clearTimeout(retryTimer);
+  if(link.pend.has("stream")){ link.pend.delete("stream"); link.order = link.order.filter(k=>k!=="stream"); }
+  if(S.devMic){ link.send("mic", P.micOn(true)); link.send("micSens", P.micSens(Math.round($("#devSens").value*2.55))); bgDiag("reconnected: put strip back in mic mode"); }
   store.set(DEV_KEY, {id: dev.id, name: dev.name});
   setConn("on", dev.name || "Connected");
   S.on = true; renderPower(); haptic([10,40,14]);
@@ -742,7 +746,7 @@ const bgLog = [];
 function bgDiag(msg){ const t = new Date().toLocaleTimeString(); bgLog.push(t + "  " + msg); if(bgLog.length>40) bgLog.shift(); renderBgLog(); }
 function renderBgLog(){ const el = document.getElementById("bgLog"); if(el) el.textContent = bgLog.length ? bgLog.join("\n") : "Nothing recorded yet."; }
 let hb = null, hiddenAt = 0, beatsHidden = 0, framesAtHide = 0;
-function bgActive(){ return !!(studioTimer || mus || playlist); }
+function bgActive(){ return !!(studioTimer || mus || playlist || S.devMic); }
 hb = ticker.every(() => {
   if(document.visibilityState === "hidden" && bgActive()){
     beatsHidden++;
@@ -769,7 +773,7 @@ document.addEventListener("visibilitychange", () => {
 });
 // screen wake lock is dropped when the page is hidden; take it back on return
 document.addEventListener("visibilitychange", () => {
-  if(document.visibilityState==="visible" && (studioTimer || mus) && store.get("keepAwake", false)) bgStart(bg.label);
+  if(document.visibilityState==="visible" && (studioTimer || mus || S.devMic) && store.get("keepAwake", false)) bgStart(bg.label);
 });
 
 let selTok = 0;
@@ -995,6 +999,7 @@ function renderSwatches(el, list, removable){
 let favs = store.get("favs", []);
 function renderFavs(){ renderSwatches($("#favs"), favs, true); $("#favsEmpty").hidden = favs.length>0; }
 function applyColour(c, fromSlider){
+  if(typeof leaveDevMic==='function' && S.devMic) leaveDevMic();
   if(!fromSlider){ selTok++; $$('.tile[data-state=pending]').forEach(x=>x.removeAttribute('data-state')); }
   if(typeof clearActive==='function') clearActive();
   if(typeof bgStop==='function' && !mus) bgStop();
@@ -1056,6 +1061,7 @@ function renderFx(){
   });
 }
 function playMode(id, fromPlaylist){
+  leaveDevMic();
   if(!fromPlaylist){ stopPlaylist(); if(!mus) bgStop(); }
   stopStudio(); stopMusic(true); curMode=null;
   $$("#fxGrid .tile").forEach(x=>x.setAttribute("aria-pressed", false));
@@ -1077,7 +1083,7 @@ function renderScenes(){
     b.style.setProperty("--bar","linear-gradient(90deg,var(--wall-2),var(--glow))");
     b.innerHTML=`<span class="bar"></span><span class="nm">${n}</span><span class="id">Scene ${id}</span>`;
     b.dataset.scene=id;
-    b.onclick=()=>{ stopPlaylist(); stopStudio(); stopMusic(true); bgStop();
+    b.onclick=()=>{ leaveDevMic(); stopPlaylist(); stopStudio(); stopMusic(true); bgStop();
       $$("#sceneGrid .tile").forEach(x=>x.setAttribute("aria-pressed", false));
       const sent = link.send("scene",P.scene(id));
       show("mode", link.ok ? "Starting " + n + " scene…" : n+" scene", {fn:patternFor("Auto Play")});
@@ -1175,6 +1181,7 @@ function renderStudio(){
   });
 }
 function runStream(label, fn, real){
+  leaveDevMic();
   stopStudio(); stopMusic(true); curMode=null;
   const start=performance.now(); let tAcc=0, last=start;
   const tick=()=>{
@@ -1351,6 +1358,7 @@ function renderMusModes(){
     b.onclick=()=>{ musMode=m; store.set("musMode",m); renderMusModes(); }; el.appendChild(b); });
 }
 async function startMusic(){
+  leaveDevMic();
   stopPlaylist();
   bgStart("Music · " + musMode);   // must start during the tap, before awaiting the mic
   try{
@@ -1390,8 +1398,27 @@ function stopMusic(silent){
 }
 $("#musBtn").onclick=()=> mus ? stopMusic() : startMusic();
 $("#musSens").oninput=e=>$("#musSensOut").textContent=e.target.value+"%";
-$("#devMic").onclick=e=>{ const on=e.currentTarget.getAttribute("aria-checked")!=="true"; e.currentTarget.setAttribute("aria-checked",on); link.send("mic",P.micOn(on)); toast(on?"Built-in mic on":"Built-in mic off"); };
-$("#devSens").oninput=e=>{ $("#devSensOut").textContent=e.target.value+"%"; link.send("micSens",P.micSens(Math.round(e.target.value*2.55))); };
+S.devMic = false;
+const beatPreview = (i,n,t) => { const p=(t*2.1)%1, k=Math.max(.12, 1-p*1.8); return hsv((Math.floor(t*2.1)*67)%360, 1, k); };
+function setDevMic(on, quiet){
+  S.devMic = on; $("#devMic").setAttribute("aria-checked", on);
+  link.send("mic", P.micOn(on));
+  if(on){
+    selTok++; stopPlaylist(); stopStudio(); stopMusic(true); clearActive();
+    link.send("micSens", P.micSens(Math.round($("#devSens").value*2.55)));
+    show("mode", "Reacting to music (strip mic)", {fn: beatPreview});
+    bgStart("Reacting to music");          // keeps Bluetooth alive in the background
+    if(!quiet) toast(link.ok ? "Strip is listening to the room" : "Connect the strip to use its mic");
+  }else{
+    bgStop();
+    if(!quiet) toast("Strip mic off");
+  }
+}
+// any other choice takes the strip out of mic mode
+function leaveDevMic(){ if(S.devMic) setDevMic(false, true); }
+$("#devMic").onclick=e=>{ const on=e.currentTarget.getAttribute("aria-checked")!=="true"; setDevMic(on); if(!on) applyColour(S.color); };
+$("#devSens").oninput=e=>{ $("#devSensOut").textContent=e.target.value+"%"; link.send("micSens",P.micSens(Math.round(e.target.value*2.55))); store.set("devSens", +e.target.value); };
+$("#devSens").value = store.get("devSens", 50); $("#devSensOut").textContent = $("#devSens").value + "%";
 
 /* ---------- settings ---------- */
 $("#pixN").value=S.pix;
